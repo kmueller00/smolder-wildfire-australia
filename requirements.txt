@@ -1,0 +1,10 @@
+torch>=2.0
+lightning>=2.0
+zarr>=2.13,<3
+numcodecs
+numpy
+scipy
+pandas
+scikit-learn
+matplotlib
+xarray

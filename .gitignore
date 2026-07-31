@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+*.zarr/
+logs/
+lightning_logs/
+*.npy
+.DS_Store
