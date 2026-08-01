@@ -1098,6 +1098,59 @@ similar strength" rule has held up three times.
 **`SWA(resume ep28,29,30)` therefore still stands as the best model**:
 0.4485 AUC-PR, 14.5x near-field lift. Nothing in this round beat it.
 
+## FINAL RESULT: the no-fire-history specialist DOES carry far-field signal (job 1766529)
+
+The specialist (`FIRE_HISTORY=0`, weather/terrain/lightning only) looked dead on
+`val_ap`: 0.0116 peak vs the main model's 0.51, a ~50x collapse, and it
+early-stopped at ep8 with a flat, trendless curve. Judged on `val_ap` it is a
+total failure. **But `val_ap` is the wrong metric for it by construction** --
+pooled AP is dominated by near-field pixels the specialist cannot see. Scored
+where it was actually designed to work (r>=10px, genuinely isolated ignition):
+
+### NEW-fire lift @ top-0.5%, far field
+| model | r=10px | r=20px | r=40px |
+|---|---|---|---|
+| main model SWA(resume) | 0.11 | 0.12 | 0.20 |
+| **specialist (no fire history)** | **0.60** | **0.43** | **1.55** |
+| prob-mean of the two | 0.07 | 0.06 | 0.23 |
+
+Specialist full grid at r=40px across windows: 1.55 / 2.33 / **3.44** / 1.98 /
+2.87 (3d/7d/14d/30d/90d) -- **above random**, the only configuration in the
+whole project to clear 1.0x on genuinely isolated ignitions.
+
+### Three conclusions
+1. **The far-field signal is real but weak.** 0.60 vs 0.11 at r=10px (46
+   new-fire px/patch, so not a small-sample artifact) is a robust ~5x
+   advantage. The r=40px numbers (1.55-3.44x) sit on 2-11 px/patch and are
+   correspondingly noisy -- treat the direction as real, the magnitude as
+   uncertain.
+2. **Naive prob-mean DESTROYS it** (0.07, worse than either member). The main
+   model's confident near-field predictions dominate the average and swamp the
+   specialist's weak far-field signal. Combining these two requires a
+   REGIME-SWITCHED rule -- use the specialist only where no recent fire is
+   within ~10km, the main model elsewhere -- not a blend. This is a different
+   failure mode from the earlier "weak member drags the pool" cases: here the
+   members are good at DISJOINT regimes, so averaging is the wrong operator
+   entirely.
+3. **This vindicates the earlier caution about judging it on `val_ap`.** A
+   model can be 50x worse on the pooled metric and still be the only thing
+   that works in the regime that matters. Same lesson as `val_ap_newfire` and
+   the OHEM inversion, in the opposite direction.
+
+### Corrected claim
+An earlier draft of the repo README stated the specialist "failed to learn at
+all ... indicating the remaining predictors do not contain sufficient signal
+for isolated ignition at this resolution." **That is wrong and was corrected
+before publication.** Weather/terrain/lightning DO contain far-field ignition
+signal; it is simply far too weak to register in a pooled metric dominated by
+near-field spread.
+
+### Next step if this work continues
+Build the regime-switched combiner (specialist where `fire_dist` indicates no
+fire within ~10km, main model otherwise) and evaluate at both radii. That is
+the single most promising untested idea left, and it needs no new training --
+both checkpoints already exist and are archived.
+
 ## Pitfalls
 - v1 `conv_lstm_lit.py` had a recency-weights bug (never applied on channels-first
   input) — fixed 2026-07-14; backup at `conv_lstm_lit.py.bak_pre_recencyfix`.
