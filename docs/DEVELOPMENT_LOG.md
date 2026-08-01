@@ -1151,6 +1151,54 @@ fire within ~10km, main model otherwise) and evaluate at both radii. That is
 the single most promising untested idea left, and it needs no new training --
 both checkpoints already exist and are archived.
 
+## Regime-switched combiner: REJECTED (job 1767172)
+
+Following the specialist result, the obvious next step was to switch rather
+than blend -- assign each pixel to a regime by distance-to-recent-fire and
+score it with whichever model owns that regime, using within-regime percentile
+ranks so the two models' very different output distributions stay
+commensurable. `beta` controlled how much of the top-k budget the far field
+could claim. Swept 3 switch radii x 6 betas (`regime_switch_eval.py`).
+
+**No favourable trade exists.** Every setting either left the far field alone
+or destroyed everything else:
+
+| switch | beta | AUC-PR | all-fire | near r=3 | FAR r=10 |
+|---|---|---|---|---|---|
+| baseline (main only) | -- | **0.4556** | 104.7x | 13.48x | **2.51x** |
+| 10px | 0.25 | 0.3505 | 104.0 | 11.98 | 0.02 |
+| 10px | 0.75 | 0.3486 | 103.3 | 10.46 | 0.19 |
+| 10px | 1.0 | 0.0331 | 45.7 | 1.27 | 1.92 |
+| 10px | 1.5 | 0.0021 | 0.6 | 1.36 | 2.10 |
+
+At beta<=0.75 the far field never gets enough budget to matter; at beta>=1.0
+it does, and AUC-PR collapses by an order of magnitude (0.456 -> 0.033 ->
+0.002). **Nothing beat the baseline's own far-field 2.51x.** Top-k is a fixed
+budget and the specialist's far-field ranking is not good enough to justify
+spending any of it -- the pixels it promotes are not the right ones often
+enough. Note also that the percentile-rank construction alone costs AUC-PR
+(0.4556 -> ~0.37 even at beta=0), because ranking within regimes discards
+cross-regime magnitude information.
+
+Conclusion: the specialist's far-field advantage over the main model is real
+but too weak to exploit through score combination. Exploiting it would need a
+genuinely better far-field model, not a better way of mixing this one.
+
+### METHODOLOGICAL WARNING: far-field lift is definition-sensitive across scripts
+The baseline far-field lift reads **2.51x** here but **0.11x** in
+`newfire_definition_sweep.py` on the same model, patches and radius. The cause
+is a real difference in how "recent fire" is built:
+- `newfire_definition_sweep.py`: UNION of `y_fire_3d` over a W-day window read
+  from the zarr (line ~175, `span.any(axis=0) & land`).
+- `regime_switch_eval.py`: the SINGLE `fire_hist_t-3` channel (line 111).
+
+The union marks more area as "known", so fewer pixels qualify as far-field new
+fire and the survivors are genuinely more isolated -- hence much lower lift.
+Both are internally consistent and each sweep's relative comparisons are valid,
+but **far-field numbers must not be compared across the two scripts**. Any
+published far-field figure has to state which definition produced it. The
+README's 0.11x quotes the sweep (union) definition.
+
 ## Pitfalls
 - v1 `conv_lstm_lit.py` had a recency-weights bug (never applied on channels-first
   input) — fixed 2026-07-14; backup at `conv_lstm_lit.py.bak_pre_recencyfix`.

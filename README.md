@@ -99,7 +99,29 @@ correspondingly noisy; treat the direction as robust and the magnitude as
 uncertain. The r=10 px comparison (46 px/patch) is solid.
 
 We recommend reporting **two numbers**: near-field spread lift (r = 3 px) and
-true new-ignition lift (r >= 10 px).
+true new-ignition lift (r >= 10 px). **State which "recent fire" definition
+produced them** - far-field lift is highly sensitive to whether the reference
+mask is a single t-3 slice or a union over a multi-day window (we measured
+2.51x vs 0.11x for the same model, patches and radius under the two
+conventions). Figures here use the multi-day-union definition.
+
+### Combining the two models does not work
+
+We also tested a regime-switched combiner: assign each pixel to a regime by
+distance-to-recent-fire, score it with the model that owns that regime, using
+within-regime percentile ranks so the two output distributions stay
+commensurable, and sweep how much of the top-k budget the far field may claim
+(3 switch radii x 6 budget weights). **No favourable trade exists.** Small
+budgets leave the far field unchanged; large ones lift it slightly while
+collapsing AUC-PR by an order of magnitude (0.456 -> 0.033 -> 0.002). Nothing
+beat the main model's own far-field score.
+
+Top-k is a fixed budget, and the specialist's far-field ranking is not good
+enough to justify spending any of it. The specialist's advantage over the main
+model is real but too weak to exploit by score combination - closing this gap
+needs a better far-field model, not a better mixing rule. Likely routes:
+fire-weather indices (FFDI/FWI), live fuel moisture from Sentinel-2 SWIR, and
+sub-pixel fuel continuity - none of which are in the current predictor set.
 
 ---
 
@@ -177,6 +199,9 @@ Findings that generalise beyond this dataset, documented in
 6. **Judge a specialist model in its own regime, not on the pooled metric.**
    The fire-history-free model is ~50x worse on pooled validation AP and
    simultaneously the only model that beats random on isolated ignitions.
+7. **A real but weak signal may still be unexploitable.** The specialist beats
+   the main model ~5x in the far field, yet no regime-switched combination
+   converted that into a net gain, because top-k is a fixed budget.
 
 ---
 
