@@ -64,12 +64,39 @@ At the commonly used **r = 3 px (3 km)** threshold, **89 % of pixels labelled
 | New-fire lift @0.5 % | 53.0x | 33.0x | 11.1x | 3.4x | **0.1x** | **0.1x** |
 
 **Interpretation.** The headline 14.5x is genuine *near-field spread* skill, and
-model-vs-model comparisons at fixed *r* remain valid. But this model has
-**essentially no skill at genuinely isolated new ignitions**. A dedicated model
-trained without fire-history inputs failed to learn at all (val AP ~0.01 vs
-0.51), indicating the remaining predictors (weather, terrain, lightning
-climatology) do not contain sufficient signal for isolated ignition at this
-resolution.
+model-vs-model comparisons at fixed *r* remain valid. But the main model has
+**essentially no skill at genuinely isolated new ignitions** (0.11x at 10 km).
+
+### A fire-history-free specialist recovers part of the far field
+
+We trained a second model with the fire-history inputs removed entirely,
+forcing prediction from weather, terrain and lightning alone. On the pooled
+validation metric it looks like a total failure (val AP 0.012 vs 0.51, a ~50x
+collapse). Scored in the regime it was designed for, it is the **only model
+here that beats random on isolated ignitions**:
+
+| Model | r=10 px | r=20 px | r=40 px |
+|---|---|---|---|
+| Main model (SWA) | 0.11x | 0.12x | 0.20x |
+| **No-fire-history specialist** | **0.60x** | **0.43x** | **1.55x** |
+| Probability average of both | 0.07x | 0.06x | 0.23x |
+
+Three points follow:
+
+1. **Weather/terrain/lightning do carry far-field ignition signal** - roughly
+   5x more than the main model at 10 km - but it is far too weak to register in
+   a pooled metric dominated by near-field spread.
+2. **Naive probability averaging destroys it** (0.07x, worse than either
+   member). The main model's confident near-field predictions swamp the
+   specialist. These two are strong in *disjoint* regimes, so a blend is the
+   wrong operator; a **regime-switched** rule is required - specialist where no
+   recent fire lies within ~10 km, main model elsewhere.
+3. **Pooled validation metrics can be actively misleading.** A model 50x worse
+   on val AP was the only one to clear 1.0x where it matters.
+
+The r=40 px figures rest on 2-11 qualifying pixels per patch and are
+correspondingly noisy; treat the direction as robust and the magnitude as
+uncertain. The r=10 px comparison (46 px/patch) is solid.
 
 We recommend reporting **two numbers**: near-field spread lift (r = 3 px) and
 true new-ignition lift (r >= 10 px).
@@ -147,6 +174,9 @@ Findings that generalise beyond this dataset, documented in
    change ranking, but did not improve AP here.
 5. **The model relies overwhelmingly on fire proximity.** Permutation importance
    attributes ~78 % of decisions to distance-to-recent-fire and fire history.
+6. **Judge a specialist model in its own regime, not on the pooled metric.**
+   The fire-history-free model is ~50x worse on pooled validation AP and
+   simultaneously the only model that beats random on isolated ignitions.
 
 ---
 
