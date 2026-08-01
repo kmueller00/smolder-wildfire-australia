@@ -14,20 +14,23 @@ All numbers are on the **2020 hold-out test year**, never used for training or
 model selection (2015-2018 train, 2019 validation). Pooled over 1500 patches /
 188.6 M land pixels, base fire rate **0.175 %**.
 
-| Model | AUC-PR | ROC-AUC | Near-field new-fire lift @0.5 % |
-|---|---|---|---|
-| XGBoost (21 engineered features) | 0.0611 | - | - |
-| ConvLSTM 256 px (early) | 0.3664 | 0.8604 | 4.4x |
-| ConvLSTM 128 px | 0.4020 | 0.8814 | 5.6x |
-| ConvLSTM 384 px (baseline) | 0.4230 | 0.9026 | 11.9x |
-| + new-fire sampling + fire-history dropout | 0.4368 | 0.8955 | 12.6x |
-| + weight averaging (SWA) | 0.4429 | 0.9011 | 12.6x |
-| + extended training | 0.4459 | 0.8959 | 14.1x |
-| **+ SWA - final model** | **0.4485** | 0.8983 | **14.5x** |
+Primary metrics are threshold-free. Distance-stratified skill is reported
+separately below, as a curve rather than a single number - see *Why we do not
+headline a "new-fire lift" figure*.
 
-The final model improves on the baseline by **+6.0 % AUC-PR** and **+21.8 %
-new-fire lift**, and outperforms a strong XGBoost baseline by roughly **7x** on
-AUC-PR.
+| Model | AUC-PR | ROC-AUC |
+|---|---|---|
+| XGBoost (21 engineered features) | 0.0611 | - |
+| ConvLSTM 256 px (early) | 0.3664 | 0.8604 |
+| ConvLSTM 128 px | 0.4020 | 0.8814 |
+| ConvLSTM 384 px (baseline) | 0.4230 | 0.9026 |
+| + new-fire sampling + fire-history dropout | 0.4368 | 0.8955 |
+| + weight averaging (SWA) | 0.4429 | 0.9011 |
+| + extended training | 0.4459 | 0.8959 |
+| **+ SWA - final model** | **0.4485** | 0.8983 |
+
+The final model improves on the baseline by **+6.0 % AUC-PR** and outperforms a
+strong XGBoost baseline by roughly **7x**.
 
 ![progression](figures/fig_model_progression.png)
 
@@ -46,11 +49,38 @@ mid-range at top-0.5 %.
 
 ---
 
-## Important caveat: what "new fire" actually measures
+## Why we do not headline a "new-fire lift" figure
 
-The conventional "new fire" definition - a fire pixel more than *r* pixels from
-any recent fire - is highly sensitive to *r*, and this project quantified that
-sensitivity directly.
+Much of the wildfire-ML literature reports a "new-fire" enrichment computed by
+excluding fire pixels within *r* pixels of recent fire. We measured how much
+that number depends on *r*, and the answer is: almost entirely. We therefore
+report the full curve and a stratified breakdown instead of a single figure.
+
+### Skill by distance stratum (final model, 2020 hold-out, 600 patches)
+
+| Stratum | Distance from recent fire | Share of fire px | Lift @0.5 % |
+|---|---|---|---|
+| Persistence + adjacent spread | 0-1 px | 48 % | 53.0x - 33.0x |
+| Near-field spread | 1-5 px | 19 % | 33.0x - 3.4x |
+| Mid-field | 5-10 px | 9 % | 3.4x - 0.1x |
+| **Isolated ignition** | **>= 10 px** | **21 %** | **0.1x** |
+
+Shares are of all fire pixels under a 3-day history window and do not sum to
+100 % because the strata are nested cumulative thresholds. Lift ranges give the
+value at each stratum boundary.
+
+Moving the cutoff from 3 px to 5 px - both equally defensible - changes the
+headline number **threefold**. Our implementation also used
+`binary_dilation(iterations=3)`, whose default cross structuring element is a
+taxicab diamond rather than a 3 px euclidean disk, so the shipped metric was not
+even the radius it claimed. And the same model, patches and radius yield 2.51x
+or 0.11x depending on whether "recent fire" is a single t-3 slice or a
+multi-day union.
+
+No principled single *r* exists: spread rates range from ~1 km/h in forest to
+~25 km/h in grassland, so no fixed distance separates spread from ignition
+across Australia. That irreducible ambiguity is the argument for publishing the
+curve.
 
 ![newfire](figures/fig_newfire_distance_decay.png)
 
