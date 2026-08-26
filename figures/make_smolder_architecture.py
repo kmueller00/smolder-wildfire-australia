@@ -43,7 +43,7 @@ ax.text(1.55, 7.95, "INPUT  ·  two timescales", fontsize=11.5, fontweight="bold
 
 cube_stack(0.45, 5.75, 5, 1.5, 1.05, SLOW)
 ax.text(1.55, 5.34, "SLOW branch", fontsize=11.5, fontweight="bold", color=SLOW, ha="center")
-ax.text(1.55, 4.97, "144 days  ·  8-day bins", fontsize=9.6, color=INK, ha="center")
+ax.text(1.55, 4.97, "144 days  ·  8 day bins", fontsize=9.6, color=INK, ha="center")
 ax.text(1.55, 4.62, "leaf area · soil moisture · rainfall", fontsize=8.8, color="#555", ha="center")
 ax.text(1.55, 4.02, "“how much fuel is there,\nand how dry is it?”", fontsize=9.4, color=SLOW,
         ha="center", style="italic", linespacing=1.5)
@@ -69,10 +69,10 @@ ax.text(5.55, 4.02, "each cell sees its neighbours\nAND remembers the past",
         fontsize=9.2, color="#555", ha="center", style="italic", linespacing=1.5)
 
 # ---------------------------------------------------------------- fusion
-ax.text(9.15, 7.95, "FUSE  ·  cross-attention", fontsize=11.5, fontweight="bold",
+ax.text(9.15, 7.95, "FUSE  ·  cross attention", fontsize=11.5, fontweight="bold",
         color=INK, ha="center")
 box(8.0, 3.62, 2.3, 1.5, "#faf5ff", FUSE, lw=2.4)
-ax.text(9.15, 4.72, "cross-attention", fontsize=11.5, fontweight="bold", color=FUSE, ha="center")
+ax.text(9.15, 4.72, "cross attention", fontsize=11.5, fontweight="bold", color=FUSE, ha="center")
 ax.text(9.15, 3.98, "today's weather asks:\n“which fuel signal\nmatters here?”", fontsize=8.9,
         color="#555", ha="center", linespacing=1.45)
 
@@ -108,7 +108,7 @@ ax.text(13.0, 2.06, "continental Australia · 3474 × 4110 grid", fontsize=8.6,
         color="#666", ha="center")
 
 ax.text(7.6, -0.62,
-        "SMOLDER — Slow-Memory Operator with Latent Dual-attention for Estimating fire Risk.  The branches are read at "
+        "SMOLDER  |  Slow Memory Operator with Latent Dual attention for Estimating fire Risk.  The branches are read at "
         "different rates because fuel dries over months while fire weather turns over hours.",
         fontsize=9.3, color="#444", ha="center", style="italic")
 

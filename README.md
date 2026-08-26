@@ -35,9 +35,9 @@ All numbers are on the **2020 hold-out test year**, never used for training or
 model selection (2015-2018 train, 2019 validation). Pooled over 1500 patches /
 188.6 M land pixels, base fire rate **0.175 %**.
 
-Primary metrics are threshold-free. Distance-stratified skill is reported
-separately below, as a curve rather than a single number - see *Why we do not
-headline a "new-fire lift" figure*.
+Primary metrics are threshold free. Distance stratified skill is reported
+separately below, as a curve rather than a single number: see *Why we do not
+headline a new fire lift figure*.
 
 | Model | AUC-PR | ROC-AUC |
 |---|---|---|
@@ -53,7 +53,7 @@ headline a "new-fire lift" figure*.
 SMOLDER improves on the baseline by **+6.0 % AUC-PR** and outperforms a strong
 XGBoost baseline by roughly **7x**.
 
-![progression](figures/fig_model_progression.png)
+![model vs xgboost](figures/fig_model_vs_xgboost.png)
 
 ### Operating characteristics (final model)
 

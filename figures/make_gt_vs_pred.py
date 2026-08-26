@@ -50,9 +50,18 @@ def main():
         land = b["mask"].numpy() > 0.5
         y = (b["y"][-1].numpy() > 0) & land
         n = int(y.sum())
-        tt = int(b["t_end"]); date = TIMES[tt] if tt < len(TIMES) else str(tt)
-        if n >= 250 and land.mean() > 0.65 and date[:7] not in seen:
-            seen.add(date[:7]); picks.append((n, date, b))
+        tt = int(b["t_end"]); iso = TIMES[tt] if tt < len(TIMES) else str(tt)
+        # Dedup on the ISO month BEFORE reformatting, so the four panels stay
+        # spread across the year. Display form is "16 June 2020" so that no
+        # dash characters appear anywhere in the rendered figure.
+        _M = ["January","February","March","April","May","June","July",
+              "August","September","October","November","December"]
+        try:
+            date = f"{int(iso[8:10])} {_M[int(iso[5:7])-1]} {iso[:4]}"
+        except Exception:
+            date = iso
+        if n >= 250 and land.mean() > 0.65 and iso[:7] not in seen:
+            seen.add(iso[:7]); picks.append((n, date, b))
         if len(picks) >= N_EX: break
     picks.sort(key=lambda t: -t[0])
     print("[info] dates:", [(p[1], p[0]) for p in picks], flush=True)
@@ -119,12 +128,12 @@ def main():
 
     handles = [Patch(facecolor="#b00000", label="Observed fire (left panels)"),
                Patch(facecolor="#0b3d91", label="Observed fire overlaid on prediction"),
-               Patch(facecolor="none", edgecolor="#111", label="Model's top-1% highest-risk area"),
+               Patch(facecolor="none", edgecolor="#111", label="Model top 1% highest risk area"),
                Patch(facecolor=(0.80, 0.89, 0.95), label="Ocean / masked")]
     fig.legend(handles=handles, loc="lower center", ncol=4, fontsize=9,
                frameon=True, bbox_to_anchor=(0.5, 0.004))
-    fig.suptitle("SMOLDER — predicted wildfire risk vs what actually burned\n"
-                 "2020 hold-out year, never used for training or model selection",
+    fig.suptitle("SMOLDER  |  predicted wildfire risk vs what actually burned\n"
+                 "2020 holdout year, never used for training or model selection",
                  fontsize=13.5, fontweight="bold", y=0.997)
     fig.subplots_adjust(bottom=0.055, top=0.945, hspace=0.10, wspace=0.02)
     fig.savefig(OUT, dpi=250, bbox_inches="tight", facecolor="white")
