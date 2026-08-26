@@ -1,4 +1,4 @@
-"""Clean, self-explanatory architecture overview for TINDER.
+"""Clean, self-explanatory architecture overview for SMOLDER.
 
 Design goal: a reader who has never seen this project should understand the
 whole idea in about ten seconds -- two input streams at different timescales,
@@ -108,9 +108,9 @@ ax.text(13.0, 2.06, "continental Australia · 3474 × 4110 grid", fontsize=8.6,
         color="#666", ha="center")
 
 ax.text(7.6, -0.62,
-        "TINDER — Two-timescale Integrated Network with Dual-attention for Estimating fire Risk.  The branches are read at "
+        "SMOLDER — Slow-Memory Operator with Latent Dual-attention for Estimating fire Risk.  The branches are read at "
         "different rates because fuel dries over months while fire weather turns over hours.",
         fontsize=9.3, color="#444", ha="center", style="italic")
 
-fig.savefig("fig_tinder_architecture.png", dpi=300, bbox_inches="tight", facecolor="white")
-print("wrote figures/fig_tinder_architecture.png")
+fig.savefig("fig_smolder_architecture.png", dpi=300, bbox_inches="tight", facecolor="white")
+print("wrote figures/fig_smolder_architecture.png")

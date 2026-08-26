@@ -1,23 +1,23 @@
-# TINDER
+# SMOLDER
 
-**T**wo-timescale **I**ntegrated **N**etwork with **D**ual-attention for
+**S**low-**M**emory **O**perator with **L**atent **D**ual-attention for
 **E**stimating fire **R**isk — per-pixel **next-3-day wildfire risk** for
 continental Australia at ~1 km resolution.
 
-The name is literal: *tinder* is long-accumulated dry fuel, and tracking that
-fuel over **144 days** is what separates this model from short-window
-fire-weather baselines. TINDER reads two streams at different speeds, because
-the two things that cause a fire evolve at different speeds — **fuel** dries out
-over months, while **fire weather** turns over in hours. A ConvLSTM encodes
-each stream, and dual cross-attention lets today's weather ask which part of
-the long-term fuel signal matters where.
+The name is literal: a smoulder is a slow burn, and *slow memory* is what
+separates this model from short-window fire-weather baselines. SMOLDER tracks
+fuel state over **144 days**, because the two things that cause a fire evolve at
+very different speeds — **fuel** dries out over months, while **fire weather**
+turns over in hours. A ConvLSTM encodes each stream at its own rate, and dual
+cross-attention lets today's weather ask which part of the long-term fuel
+signal matters where.
 
-![architecture](figures/fig_tinder_architecture.png)
+![architecture](figures/fig_smolder_architecture.png)
 
 ## Predictions vs reality
 
 Four dates from the 2020 hold-out year — left, what actually burned; right,
-what TINDER predicted three days earlier. The black outline is the model's
+what SMOLDER predicted three days earlier. The black outline is the model's
 top-1 % highest-risk area.
 
 ![ground truth vs predicted](figures/fig_gt_vs_pred_2020.png)
@@ -48,9 +48,9 @@ headline a "new-fire lift" figure*.
 | + new-fire sampling + fire-history dropout | 0.4368 | 0.8955 |
 | + weight averaging (SWA) | 0.4429 | 0.9011 |
 | + extended training | 0.4459 | 0.8959 |
-| **TINDER (final: SWA)** | **0.4485** | 0.8983 |
+| **SMOLDER (final: SWA)** | **0.4485** | 0.8983 |
 
-TINDER improves on the baseline by **+6.0 % AUC-PR** and outperforms a strong
+SMOLDER improves on the baseline by **+6.0 % AUC-PR** and outperforms a strong
 XGBoost baseline by roughly **7x**.
 
 ![progression](figures/fig_model_progression.png)
@@ -178,7 +178,7 @@ sub-pixel fuel continuity - none of which are in the current predictor set.
 
 ## Architecture
 
-TINDER's backbone (`ConvLSTMSegDual`) is two independent ConvLSTM encoders fused by per-pixel
+SMOLDER's backbone (`ConvLSTMSegDual`) is two independent ConvLSTM encoders fused by per-pixel
 cross-attention (query = fast branch, key/value = slow branch):
 
 - **Slow branch** - LAI, soil moisture, precipitation over **144 days** in
@@ -213,7 +213,7 @@ docs/            full development log
 ```bash
 pip install -r requirements.txt
 
-# Evaluate TINDER on the 2020 test year
+# Evaluate SMOLDER on the 2020 test year
 CKPT=checkpoints/firecastnet_best_swa.ckpt PATCH=384 EVAL_YEAR=2020 N_PATCH=1500 \
   python firecastnet/evaluation/operational_stats_dual.py
 
@@ -277,11 +277,11 @@ the land mask before any distance transform or metric computation.
 ## Citation
 
 ```bibtex
-@software{tinder_australia,
-  title  = {TINDER: a Two-timescale Integrated Network with Dual-attention
-            for Estimating wildfire Risk over Australia},
+@software{smolder_australia,
+  title  = {SMOLDER: a Slow-Memory Operator with Latent Dual-attention for
+            Estimating wildfire Risk over Australia},
   year   = {2026},
-  url    = {https://github.com/catKorb/tinder-wildfire-australia}
+  url    = {https://github.com/catKorb/smolder-wildfire-australia}
 }
 ```
 
