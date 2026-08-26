@@ -1,4 +1,4 @@
-"""Clean, self-explanatory architecture overview for FLARE.
+"""Clean, self-explanatory architecture overview for WildFLARE.
 
 Design goal: a reader who has never seen this project should understand the
 whole idea in about ten seconds -- two input streams at different timescales,
@@ -108,9 +108,9 @@ ax.text(13.0, 2.06, "continental Australia · 3474 × 4110 grid", fontsize=8.6,
         color="#666", ha="center")
 
 ax.text(7.6, -0.62,
-        "FLARE — Fast-slow Latent Attention for Risk Estimation.  The two branches are read at "
+        "WildFLARE — Wildfire Fast-slow Latent Attention for Risk Estimation.  The two branches are read at "
         "different rates because fuel dries over months while fire weather turns over hours.",
         fontsize=9.3, color="#444", ha="center", style="italic")
 
-fig.savefig("fig_flare_architecture.png", dpi=300, bbox_inches="tight", facecolor="white")
-print("wrote figures/fig_flare_architecture.png")
+fig.savefig("fig_wildflare_architecture.png", dpi=300, bbox_inches="tight", facecolor="white")
+print("wrote figures/fig_wildflare_architecture.png")

@@ -1,4 +1,4 @@
-"""Ground truth vs FLARE prediction for four 2020 test-year dates.
+"""Ground truth vs WildFLARE prediction for four 2020 test-year dates.
 
 One row per date: what actually burned, next to what the model predicted the
 day before. Both panels share the same patch, extent and colour conventions so
@@ -105,7 +105,7 @@ def main():
                 yy, xx = np.where(truth)
                 ax.scatter(ext[0] + (xx+0.5)*PX, ext[3] - (yy+0.5)*PX, s=1.4,
                            c="#0b3d91", marker="s", linewidths=0, alpha=0.85)
-                ax.set_title("FLARE predicted risk  ·  3 days ahead", fontsize=11,
+                ax.set_title("WildFLARE predicted risk  ·  3 days ahead", fontsize=11,
                              fontweight="bold", pad=7)
                 ax.text(0.025, 0.045,
                         f"{caught}/{nfire} caught in top 1%  ({100*caught/max(nfire,1):.0f}%)",
@@ -123,7 +123,7 @@ def main():
                Patch(facecolor=(0.80, 0.89, 0.95), label="Ocean / masked")]
     fig.legend(handles=handles, loc="lower center", ncol=4, fontsize=9,
                frameon=True, bbox_to_anchor=(0.5, 0.004))
-    fig.suptitle("FLARE — predicted fire risk vs what actually burned\n"
+    fig.suptitle("WildFLARE — predicted wildfire risk vs what actually burned\n"
                  "2020 hold-out year, never used for training or model selection",
                  fontsize=13.5, fontweight="bold", y=0.997)
     fig.subplots_adjust(bottom=0.055, top=0.945, hspace=0.10, wspace=0.02)

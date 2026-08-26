@@ -1,19 +1,20 @@
-# FLARE
+# WildFLARE
 
-**F**ast-slow **L**atent **A**ttention for **R**isk **E**stimation — per-pixel
-**next-3-day wildfire risk** for continental Australia at ~1 km resolution.
+**Wild**fire **F**ast-slow **L**atent **A**ttention for **R**isk **E**stimation —
+per-pixel **next-3-day wildfire risk** for continental Australia at ~1 km
+resolution.
 
-FLARE reads two input streams at different speeds, because the two things that
+WildFLARE reads two input streams at different speeds, because the two things that
 cause a fire evolve at different speeds: **fuel** dries out over months, while
 **fire weather** turns over in hours. A ConvLSTM encodes each stream, and
 cross-attention lets today's weather ask which part of the fuel signal matters.
 
-![architecture](figures/fig_flare_architecture.png)
+![architecture](figures/fig_wildflare_architecture.png)
 
 ## Predictions vs reality
 
 Four dates from the 2020 hold-out year — left, what actually burned; right,
-what FLARE predicted three days earlier. The black outline is the model's
+what WildFLARE predicted three days earlier. The black outline is the model's
 top-1 % highest-risk area.
 
 ![ground truth vs predicted](figures/fig_gt_vs_pred_2020.png)
@@ -44,9 +45,9 @@ headline a "new-fire lift" figure*.
 | + new-fire sampling + fire-history dropout | 0.4368 | 0.8955 |
 | + weight averaging (SWA) | 0.4429 | 0.9011 |
 | + extended training | 0.4459 | 0.8959 |
-| **FLARE (final: SWA)** | **0.4485** | 0.8983 |
+| **WildFLARE (final: SWA)** | **0.4485** | 0.8983 |
 
-FLARE improves on the baseline by **+6.0 % AUC-PR** and outperforms a strong
+WildFLARE improves on the baseline by **+6.0 % AUC-PR** and outperforms a strong
 XGBoost baseline by roughly **7x**.
 
 ![progression](figures/fig_model_progression.png)
@@ -174,7 +175,7 @@ sub-pixel fuel continuity - none of which are in the current predictor set.
 
 ## Architecture
 
-FLARE's backbone (`ConvLSTMSegDual`) is two independent ConvLSTM encoders fused by per-pixel
+WildFLARE's backbone (`ConvLSTMSegDual`) is two independent ConvLSTM encoders fused by per-pixel
 cross-attention (query = fast branch, key/value = slow branch):
 
 - **Slow branch** - LAI, soil moisture, precipitation over **144 days** in
@@ -209,7 +210,7 @@ docs/            full development log
 ```bash
 pip install -r requirements.txt
 
-# Evaluate FLARE on the 2020 test year
+# Evaluate WildFLARE on the 2020 test year
 CKPT=checkpoints/firecastnet_best_swa.ckpt PATCH=384 EVAL_YEAR=2020 N_PATCH=1500 \
   python firecastnet/evaluation/operational_stats_dual.py
 
@@ -273,11 +274,11 @@ the land mask before any distance transform or metric computation.
 ## Citation
 
 ```bibtex
-@software{flare_australia,
-  title  = {FLARE: Fast-slow Latent Attention for Risk Estimation --
-            next-3-day wildfire risk forecasting over Australia},
+@software{wildflare_australia,
+  title  = {WildFLARE: Wildfire Fast-slow Latent Attention for Risk
+            Estimation over Australia},
   year   = {2026},
-  url    = {https://github.com/catKorb/flare-wildfire-australia}
+  url    = {https://github.com/catKorb/wildflare-australia}
 }
 ```
 
