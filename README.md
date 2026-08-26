@@ -198,7 +198,7 @@ Predictor lag structure was selected empirically: LAI peaks at ~130 days
 ## Repository layout
 
 ```
-firecastnet/
+smolder/
   models/        ConvLSTM backbone + Lightning modules
   data/          datamodule, cube builders, channel statistics
   training/      training entry point + SLURM script
@@ -215,11 +215,11 @@ pip install -r requirements.txt
 
 # Evaluate SMOLDER on the 2020 test year
 CKPT=checkpoints/firecastnet_best_swa.ckpt PATCH=384 EVAL_YEAR=2020 N_PATCH=1500 \
-  python firecastnet/evaluation/operational_stats_dual.py
+  python smolder/evaluation/operational_stats_dual.py
 
 # Reproduce the new-fire definition analysis
 CKPT=checkpoints/firecastnet_best_swa.ckpt PATCH=384 N_PATCH=600 \
-  python firecastnet/evaluation/newfire_definition_sweep.py
+  python smolder/evaluation/newfire_definition_sweep.py
 ```
 
 Data cubes are published separately on Zenodo (see *Data*).
