@@ -1199,6 +1199,70 @@ but **far-field numbers must not be compared across the two scripts**. Any
 published far-field figure has to state which definition produced it. The
 README's 0.11x quotes the sweep (union) definition.
 
+## FAR-FIELD IGNITION MAY BE IRREDUCIBLE (2026-08, gates v2/v3)
+
+Follow-up to the regime-switch rejection: if the far field needs BETTER INPUTS
+rather than a better mixing rule, do the two obvious candidate inputs help?
+
+### Two new real data sources, both wired in and tested
+- **FFDI** from SILO reanalysis (`build_ffdi.py`). An earlier attempt derived
+  FFDI from the cube's `lst_day` -- that was INVALID and the result was
+  discarded: LST runs 10-25 C above 2 m air temperature and FFDI is calibrated
+  against air temperature, while the RH recovered by inverting VPD against
+  esat(LST) was internally inconsistent. Rebuilt from SILO `max_temp` +
+  `rh_tmax` + `daily_rain` (public S3, CC-BY, 0.05 deg daily), with a real
+  Keetch-Byram drought index recursion and Griffiths drought factor. Computed
+  at a fixed reference wind so it contributes drought x temperature x humidity
+  coupling without double-counting the cube's own wind channel.
+  Cached: `aux_rasters/ffdi_{2017,2018,2020}.npz`.
+- **Live fuel moisture** from DEA `ga_s2_fmc_3_v1` (Sentinel-2, 20 m, weekly,
+  2015-07-12 onward). NOT built from raw SWIR -- this is a published product,
+  read anonymously from `s3://dea-public-data/derivative/ga_s2_fmc_3_v1/` via
+  the DEA STAC API. Patch mean AND standard deviation were used, the latter as
+  a sub-pixel fuel-continuity proxy that cannot exist in a 1 km product.
+
+### Result: nothing helps, and the threshold that judged it was meaningless
+Restricted to pixels >=15 px from any recent fire (2.4M train / 1.2M test px,
+1008 far-field fire px), 2020 hold-out, paired bootstrap 95% CI:
+
+| variant | delta AP | 95% CI | verdict |
+|---|---|---|---|
+| + roads only | +0.2% | [-6.1e-5, +7.0e-5] | indistinguishable from zero |
+| + population only | -0.4% | [-6.4e-5, +5.2e-5] | indistinguishable |
+| + roads + population | +1.0% | [-5.3e-5, +7.5e-5] | indistinguishable |
+| + FFDI | -2.5% | [-8.8e-5, +2.9e-5] | indistinguishable |
+| + FFDI + roads + pop | +1.6% | [-5.9e-5, +1.1e-4] | indistinguishable |
+
+**The 5%-delta acceptance rule used earlier in this project is not usable in
+this regime and should be retired.** CI half-width is ~6-10% of AP, so the
+experiment can only resolve effects >=10%. A 5% cutoff sits BELOW the noise
+floor: it cannot distinguish "no effect" from "underpowered", and any past
+accept/reject decision made near it was arbitrary. Report CIs instead.
+
+### Roads/population re-tested in the regime where they should matter
+The original rejection tested them POOLED, where `fire_dist`+`fire_hist` drive
+~78% of decisions and any human-density proxy is largely redundant (past fire
+already encodes where people are) -- so the -4 to -9% seen then is what adding
+a correlated feature to a saturated model looks like, NOT evidence against
+human ignition. The far field is the honest test: no fire history to be
+redundant with, and most non-tropical Australian ignitions are human. Retested
+there, they are still null. They are not ignored by the model (`log_pop` 7.9%
+gain, rank 5; `dist_road` 6.8%, rank 8) -- they simply do not generalise. The
+original verdict stands, now for a defensible reason.
+
+### The structural read
+Baseline 1.24x, best variant 1.26x, worst 1.22x, ROC-AUC pinned near 0.56
+throughout. Weather, fire danger, satellite fuel moisture, roads and
+population all land in the same narrow band barely above chance. This is
+consistent with the ConvLSTM's 0.11x far-field lift and the specialist's weak
+edge, and suggests the limit is not a missing feature: the proximate cause of
+an isolated ignition (a lightning strike, a spark, a cigarette) is a POINT
+EVENT with no spatial precursor in any gridded field. Fuel and weather govern
+whether fire can SPREAD once started; they do not determine whether it STARTS
+in a given 1 km cell on a given day. Treat far-field ignition as largely
+irreducible at this resolution, and spend effort on the near-field spread
+problem where the model demonstrably has skill.
+
 ## Pitfalls
 - v1 `conv_lstm_lit.py` had a recency-weights bug (never applied on channels-first
   input) — fixed 2026-07-14; backup at `conv_lstm_lit.py.bak_pre_recencyfix`.
