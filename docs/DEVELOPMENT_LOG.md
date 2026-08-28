@@ -1263,6 +1263,67 @@ in a given 1 km cell on a given day. Treat far-field ignition as largely
 irreducible at this resolution, and spend effort on the near-field spread
 problem where the model demonstrably has skill.
 
+## FFDI IN THE REAL MODEL: NULL, AND THE CHEAP GATE PREDICTED IT (2026-08-28)
+
+`smolder_ps384_combo_ffdi` (job 1796336) = the best-known recipe
+(`fire_history_dropout_prob=0.3` + `new_fire_frac=0.3`, ps384, same seed) with
+`USE_FFDI=1` as the ONLY difference. FFDI + Griffiths drought factor enter as
+two per-pixel dynamic channels on the fast branch.
+
+| epoch | FFDI run | combo reference | delta |
+|---|---|---|---|
+| 8 | 0.444 | 0.441 | +0.003 |
+| 12 | 0.484 | 0.475 | +0.009 |
+| 15 | 0.495 | 0.505 | -0.010 |
+| **best** | **0.5012 @ep17** | **0.5046 @ep15** | **-0.7%** |
+
+Mean delta over epochs 6-19 is **+0.003** -- noise. Real fire-danger indices,
+built from proper reanalysis air temperature and humidity with a Keetch-Byram
+drought recursion, do not improve this model.
+
+**The XGBoost gate was right, and that is worth keeping.** The gate said +0.3%
+(indistinguishable from zero); the full ConvLSTM says -0.7%. I had explicitly
+cautioned that a single-timestep tree model was a weak instrument for a feature
+whose value is accumulated drought memory -- that caution was reasonable but
+the gate's verdict held. Cheap gates before GPU runs remain the right workflow;
+this is now a validated instance rather than an assumption.
+
+### Why FFDI adds nothing here, most likely
+The cube already carries VPD, LST, wind, soil moisture and 144 days of
+precipitation. FFDI is a deterministic nonlinear function of essentially those
+same quantities. It supplies a better FUNCTIONAL FORM, not new information, and
+a ConvLSTM with a 144-day slow branch can evidently already represent whatever
+part of that form matters. Contrast the features that DID work (fuel_age,
+slope/aspect, downwind alignment): each contributed genuinely new information,
+not a recombination of existing channels.
+
+### Infrastructure built and kept
+- `build_ffdi.py` + `ffdi_{2015..2020}.zarr` (~160 MB/yr): McArthur FFDI from
+  SILO reanalysis (max_temp, rh_tmax, daily_rain), KBDI recursion + Griffiths
+  drought factor, on the model grid. `use_ffdi` flag in the datamodule.
+- `enumerate_fmc.py` + `build_fmc_grid.py` + `fmc_monthly.zarr` (500 MB):
+  DEA `ga_s2_fmc_3_v1` Sentinel-2 live fuel moisture, monthly means on the
+  1 km model grid, 2015-07..2020-12, with an `n_obs` companion array. Land
+  coverage 94-97% from 2016 on; 2015 is thin (28.6% in August) because the
+  product starts 2015-07-12 and S2B only launched in 2017.
+
+### Three practical lessons from building these
+1. **DEA's STAC API cannot serve continental queries** -- a month-wide
+   Australia search returns ~10k items and did not complete in 500 s. Enumerate
+   via S3 prefix listing instead (a whole tile-year in 1.8 s). Its pagination is
+   also OFFSET-based (`{"_o": N}`), not token-based.
+2. **Set GDAL's remote-COG env vars.** The bucket is in Sydney; from Europe the
+   default settings cost 3.8 s per scene because GDAL lists the S3 directory on
+   every open. With `GDAL_DISABLE_READDIR_ON_OPEN=EMPTY_DIR` (plus
+   `CPL_VSIL_CURL_ALLOWED_EXTENSIONS`, HTTP/2, `VSI_CACHE`) it drops to 0.2 s --
+   a 19x speedup that turned a 90-hour job into under 5 hours.
+3. **Never let a probe run share an output store with the full run.** A
+   `YEARS=2020` probe created `fmc_monthly.zarr` with 12 month slots; the full
+   72-month run then opened it in append mode, skipped creation, and wrote past
+   the end -- with the months it did write sitting under the wrong labels.
+   Silent corruption, caught only by the eventual bounds error. The script now
+   refuses to run when the store's month count does not match.
+
 ## Pitfalls
 - v1 `conv_lstm_lit.py` had a recency-weights bug (never applied on channels-first
   input) — fixed 2026-07-14; backup at `conv_lstm_lit.py.bak_pre_recencyfix`.
