@@ -1263,7 +1263,25 @@ in a given 1 km cell on a given day. Treat far-field ignition as largely
 irreducible at this resolution, and spend effort on the near-field spread
 problem where the model demonstrably has skill.
 
-## FFDI IN THE REAL MODEL: NULL, AND THE CHEAP GATE PREDICTED IT (2026-08-28)
+## CORRECTION (2026-08-28, later): the FFDI "null" below was called too early
+The section that follows was written at epoch 17 of a 25-epoch run, where FFDI
+read 0.5012 vs the reference 0.5046 and looked like a tie. It then reached
+**0.5124 @ep20** and was still climbing -- **+1.5% over the combo run's own
+25-epoch best (0.5046)**. The "FFDI is null" conclusion and the claim that the
+cheap XGBoost gate correctly predicted it are therefore BOTH premature and
+should not be relied on.
+
+This repeats a mistake this project has made before: the decisive epoch moves
+between runs (combo peaked ep15, its resume peaked ep30), so a mid-run reading
+is not a result. Wait for early stopping or the epoch budget.
+
+Status: FFDI at 25 epochs is ahead of combo at 25 epochs by 1.5% on val_ap.
+It is still BEHIND the resumed 40-epoch combo run (0.5144 @ep30), which had a
+longer budget. Per the standing rule -- and `trimmed`, which won val_ap by 4%
+and lost on real 2020 test -- none of this counts until
+`operational_stats_dual.py` confirms it on the hold-out year.
+
+## (superseded, kept for the record) FFDI IN THE REAL MODEL: NULL, AND THE CHEAP GATE PREDICTED IT (2026-08-28)
 
 `smolder_ps384_combo_ffdi` (job 1796336) = the best-known recipe
 (`fire_history_dropout_prob=0.3` + `new_fire_frac=0.3`, ps384, same seed) with
