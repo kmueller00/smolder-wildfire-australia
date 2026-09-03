@@ -258,7 +258,7 @@ Findings that generalise beyond this dataset, documented in
 
 ## Data
 
-Data cubes are archived on Zenodo: **[DOI to be inserted]**
+The data cubes used for evaluating the model are archived on Zenodo: 10.5281/zenodo.22115979 (second cube missing)
 
 Daily cubes are `zarr` stores on the SMIPS ~1 km grid (3474 x 4110, EPSG:4326,
 0.01 deg pixels, origin 112.905 E / -9.005 S) with 7 dynamic channels
