@@ -258,7 +258,7 @@ Findings that generalise beyond this dataset, documented in
 
 ## Data
 
-The data cubes used for evaluating the model are archived on Zenodo: 10.5281/zenodo.22115979 (second cube missing)
+The data cubes used for evaluating the model are archived on Zenodo: 10.5281/zenodo.22115979 and 10.5281/zenodo.21749290
 
 Daily cubes are `zarr` stores on the SMIPS ~1 km grid (3474 x 4110, EPSG:4326,
 0.01 deg pixels, origin 112.905 E / -9.005 S) with 7 dynamic channels
@@ -281,7 +281,7 @@ the land mask before any distance transform or metric computation.
   title  = {SMOLDER: a Slow-Memory Operator with Latent Dual-attention for
             Estimating wildfire Risk over Australia},
   year   = {2026},
-  url    = {https://github.com/catKorb/smolder-wildfire-australia}
+  url    = {https://github.com/kmueller00/smolder-wildfire-australia}
 }
 ```
 
