@@ -17,27 +17,27 @@ WIDTHS = (0.24, 0.31, 0.16, 0.29)
 
 SECTIONS = [
     ("Slow branch  (144 days as 18 bins of 8 days)", ACCENT, [
-        ("Leaf area index", "HiQ-LAI, reprocessed MODIS", "8-day", "8-day mean"),
+        ("Leaf area index", "HiQ-LAI (Yan et al. 2024)", "8-day", "8-day mean"),
         ("Soil moisture index", "CSIRO SMIPS", "0.01°, daily", "8-day mean"),
         ("Precipitation", "ANUClimate 2.0", "0.01°, daily", "8-day sum"),
     ]),
     ("Fast branch  (14 daily steps)", ACCENT2, [
-        ("Vapour pressure deficit", "ERA5, at daily maximum temperature", "0.25°, daily", "daily value"),
+        ("Vapour pressure deficit", "ERA5 (Hersbach et al. 2020), at Tmax", "0.25°, daily", "daily value"),
         ("Land surface temperature", "gap-filled MODIS (Zhang et al. 2022)", "1 km, daily", "daily value"),
         ("10 m wind speed", "BARRA2 reanalysis", "about 12 km, daily", "daily value"),
-        ("Fire history", "VIIRS 375 m active fire", "375 m, daily", "3 windows of 3 days up to each day"),
+        ("Fire history", "VIIRS 375 m (Schroeder et al. 2014)", "375 m, daily", "3 windows of 3 days up to each day"),
         ("Distance to recent fire", "derived from fire history", "0.01°", "exp(−d / 5 km), per time step"),
     ]),
     ("Both branches  (repeated at every time step)", STATIC, [
         ("Above-ground biomass", "ESA CCI Biomass", "100 m", "static"),
         ("Land mask", "SMIPS grid", "0.01°", "static"),
         ("Day of year", "calendar", "daily", "sine and cosine"),
-        ("Land cover", "Copernicus LC100 v3.0.1", "100 m", "learned embedding, 6 dimensions"),
-        ("Climate zone", "Köppen-Geiger 1991 to 2020", "1 km", "learned embedding, 4 dimensions"),
+        ("Land cover", "LC100 v3.0.1 (Buchhorn et al. 2020)", "100 m", "learned embedding, 6 dimensions"),
+        ("Climate zone", "Köppen-Geiger (Beck et al. 2023)", "1 km", "learned embedding, 4 dimensions"),
     ]),
     ("Training", TRAIN, [
         ("Years", "2015 to 2018", "", "1309 valid issue days"),
-        ("Target", "VIIRS fire on days D+1 to D+3", "375 m, daily", "per pixel, per fast time step"),
+        ("Target", "VIIRS fire, days D+1 to D+3", "375 m, daily", "per pixel, per fast time step"),
         ("Patches", "384 × 384 px", "", "2000 per epoch, half with ≥ 45 fire px"),
         ("New-fire sampling", "30 % of patches", "", "contain fire absent from the history"),
         ("Fire-history dropout", "30 % of samples", "", "fire-history channels set to 0"),

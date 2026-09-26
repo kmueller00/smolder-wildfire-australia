@@ -28,19 +28,6 @@ calibrated probability (see *Limitations*).
 
 ![input channels](figures/fig_inputs.png)
 
-| Variable | Source | Native resolution | Used as |
-|---|---|---|---|
-| Soil moisture index | CSIRO SMIPS (Soil Moisture Integration and Prediction System); also defines the model grid | 0.01°, daily | slow branch |
-| Precipitation | ANUClimate 2.0 daily rainfall (ANU / NCI) | 0.01°, daily | slow branch (8-day sums) |
-| Leaf area index | HiQ-LAI, reprocessed MODIS LAI (Yan et al., 2024) | 8-day | slow branch |
-| Vapour pressure deficit | ERA5 (Hersbach et al., 2020), at daily maximum temperature | 0.25°, daily | fast branch |
-| Land-surface temperature | Gap-filled daily MODIS LST (Zhang et al., 2022) | 1 km, daily | fast branch |
-| 10 m wind speed | BARRA2, Bureau of Meteorology regional reanalysis | ~12 km, daily | fast branch |
-| Active fire (inputs and target) | VIIRS 375 m active fire (VNP14IMG, NASA FIRMS; Schroeder et al., 2014); vegetation fires, nominal and high confidence | 375 m, daily | fire history, target |
-| Above-ground biomass | ESA Climate Change Initiative Biomass | 100 m | static |
-| Land cover | Copernicus Global Land Service LC100 v3.0.1 (Buchhorn et al., 2020) | 100 m | embedding |
-| Climate zone | Köppen-Geiger 1991 to 2020 (Beck et al., 2023) | 1 km | embedding |
-
 All fields are resampled to the SMIPS grid. Gaps in the 8-day LAI are filled
 by carrying the last observation forward. The original cubes also hold NDVI
 (MODIS MOD09A1), which the model does not read.
