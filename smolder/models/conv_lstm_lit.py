@@ -16,7 +16,7 @@ class ConvLSTMLit(pl.LightningModule):
 
     Expected batch from datamodule:
       x:     (B, T, H, W, C) float32/float16
-      x_cat: (B, n_cat, H, W) or (B, H, W, n_cat) int  — channel 0 = landcover, channel 1 = Koppen-Geiger
+      x_cat: (B, n_cat, H, W) or (B, H, W, n_cat) int ; channel 0 = landcover, channel 1 = Koppen-Geiger
       y:     one of:
                (B, 1, T, H, W) uint8/bool/float
                (B, T, H, W)
@@ -41,7 +41,7 @@ class ConvLSTMLit(pl.LightningModule):
       For a single unified model trained on all landcover classes together,
       leave lc_class_idx=None and set emb_dim_lc > 0 so the model receives
       landcover as an input embedding instead of using it to mask the loss.
-      emb_dim_lc=0 (default) keeps prior behaviour unchanged — no lc_emb
+      emb_dim_lc=0 (default) keeps prior behaviour unchanged; no lc_emb
       parameter is created and existing per-class checkpoints load as before.
     """
 
@@ -448,7 +448,7 @@ class ConvLSTMLit(pl.LightningModule):
         Those are different objectives (verified: 0.625 vs 0.474 on identical
         data), so a caller that flattens for masking silently trains against a
         different loss than one that does not. Prefer passing (B, N) plus a
-        `weights` mask over pre-flattening — see _compute_loss.
+        `weights` mask over pre-flattening; see _compute_loss.
         """
         probs = torch.sigmoid(logits)
         if probs.ndim > 1:
@@ -464,7 +464,7 @@ class ConvLSTMLit(pl.LightningModule):
             dice = (2.0 * intersection + eps) / (denom + eps)
             return 1.0 - dice.mean()
         else:
-            # 1D flat (already-masked pixels) — treat all as one "image"
+            # 1D flat (already-masked pixels); treat all as one "image"
             if weights is not None:
                 w = weights.reshape(-1).to(probs.dtype)
                 probs   = probs * w
@@ -663,7 +663,7 @@ class ConvLSTMLit(pl.LightningModule):
     ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
         comps: Dict[str, torch.Tensor] = {}
 
-        # Apply LC mask — flatten to (N_pixels,) for the target class only
+        # Apply LC mask; flatten to (N_pixels,) for the target class only
         logits_m, y_m = self._apply_mask(logits, y, mask)
         # Isolation weight computed on the FULL (pre-mask, pre-soft-label) target
         # so local density reflects real neighbouring fire, then flattened with
@@ -671,7 +671,7 @@ class ConvLSTMLit(pl.LightningModule):
         weight_m = self._mask_select(self._isolation_weight(y), mask)
 
         if logits_m.numel() == 0:
-            # No pixels for this LC class in the batch — return a graph-connected zero
+            # No pixels for this LC class in the batch; return a graph-connected zero
             # so DDP can still all-reduce gradients (avoids undefined-gradient crash)
             zero = (logits * 0.0).mean()
             comps["loss_phase"] = torch.tensor(-1.0, device=logits.device)

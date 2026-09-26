@@ -21,7 +21,7 @@ contain no information later than *D*. The output is a ranking score, not a
 calibrated probability (see *Limitations*).
 
 - Grid: 3474 × 4110 px, EPSG:4326, 0.01° pixels, origin 112.905° E / 9.005° S
-- Split by year: train 2015–2018, validation 2019 (checkpoint selection),
+- Split by year: train 2015 to 2018, validation 2019 (checkpoint selection),
   test 2020 (used only for the numbers below)
 
 ## Inputs
@@ -39,7 +39,7 @@ calibrated probability (see *Limitations*).
 | Active fire (inputs and target) | VIIRS 375 m active fire (VNP14IMG, NASA FIRMS; Schroeder et al., 2014); vegetation fires, nominal and high confidence | 375 m, daily | fire history, target |
 | Above-ground biomass | ESA Climate Change Initiative Biomass | 100 m | static |
 | Land cover | Copernicus Global Land Service LC100 v3.0.1 (Buchhorn et al., 2020) | 100 m | embedding |
-| Climate zone | Köppen–Geiger 1991–2020 (Beck et al., 2023) | 1 km | embedding |
+| Climate zone | Köppen-Geiger 1991 to 2020 (Beck et al., 2023) | 1 km | embedding |
 
 All fields are resampled to the SMIPS grid. Gaps in the 8-day LAI are filled
 by carrying the last observation forward. The original cubes also hold NDVI
@@ -54,8 +54,8 @@ by carrying the last observation forward. The original cubes also hold NDVI
 | Parameters | 1.09 M |
 | Patches | 384 × 384 px, 2000 per epoch; half of the draws must contain ≥ 45 fire pixels |
 | Batch | 2, gradient accumulation 4 |
-| Optimiser | AdamW, lr 3·10⁻⁴, weight decay 0.01, cosine schedule with a 25-epoch period, up to 40 epochs, early stopping on validation AP (patience 6) |
-| Loss | BCE on soft labels (fire 0.9, background 0.02), plus 0.3 · Dice for epochs 0–2; positive weight annealed 100 → 20 over 8 epochs; isolated fire pixels up-weighted (γ = 2); auxiliary loss on every fast time step (weight 0.3) |
+| Optimiser | AdamW, lr 3 × 10⁻⁴, weight decay 0.01, cosine schedule with a 25-epoch period, up to 40 epochs, early stopping on validation AP (patience 6) |
+| Loss | BCE on soft labels (fire 0.9, background 0.02), plus 0.3 × Dice for epochs 0 to 2; positive weight annealed 100 → 20 over 8 epochs; isolated fire pixels up-weighted (γ = 2); auxiliary loss on every fast time step (weight 0.3) |
 | Sampling | 30 % of patches must contain fire absent from the fire history; fire-history channels zeroed for 30 % of samples |
 | Released weights | average of the three best checkpoints by validation AP |
 
@@ -117,12 +117,12 @@ Results for the retrained model will be added here.
   described below, while the model still had access to first-day detections.
   They should be repeated before the plateau is taken as settled. Likely
   reasons for a genuine plateau: sub-kilometre fuel continuity and ignition
-  sources are averaged away at 1 km, and weather at 12–25 km resolution
+  sources are averaged away at 1 km, and weather at 12 to 25 km resolution
   varies little between neighbouring pixels.
 - **Labels are satellite detections.** VIIRS misses fires under cloud or
   canopy, small or short-lived fires, and fires between overpasses. Missed
   detections enter as negatives, both as targets and in the fire history.
-- **One test year.** 2020 includes the end of the 2019–20 Black Summer fire
+- **One test year.** 2020 includes the end of the 2019/20 Black Summer fire
   season. Performance in other years has not been measured.
 - **Scores are not probabilities.** The positive-class weighting compresses
   the raw output. `smolder.evaluation.fit_recalibration` fits an isotonic map
@@ -145,13 +145,13 @@ added to this README when its training has finished.
 | Zenodo DOI | Content | Size |
 |---|---|---|
 | [10.5281/zenodo.22115979](https://doi.org/10.5281/zenodo.22115979) | `cube_2020_zenodo.tar` → `cube_2020_zenodo.zarr`: daily cube for the 2020 test year | 35 GB |
-| [10.5281/zenodo.21749290](https://doi.org/10.5281/zenodo.21749290) | `cube_slow_8day.tar` → `cube_slow_8day.zarr`: LAI, soil moisture and precipitation in 8-day bins, 2015–2020; `aux_rasters.tar`: static rasters not used by the released model | 16 GB + 2.8 GB |
+| [10.5281/zenodo.21749290](https://doi.org/10.5281/zenodo.21749290) | `cube_slow_8day.tar` → `cube_slow_8day.zarr`: LAI, soil moisture and precipitation in 8-day bins, 2015 to 2020; `aux_rasters.tar`: static rasters not used by the released model | 16 GB + 2.8 GB |
 
 Download both records and extract the archives into one directory, for
 example `tar -xf cube_2020_zenodo.tar && tar -xf cube_slow_8day.tar`; set
 `SMOLDER_DATA` to that directory. The two records are sufficient to reproduce
 every result in this README. The
-2015–2019 daily cubes (~250 GB) are not archived because they exceed the
+2015 to 2019 daily cubes (~250 GB) are not archived because they exceed the
 record size limit.
 
 **Daily cube** (`zarr` v2, one store per year):
@@ -203,12 +203,12 @@ figures/        figures and the scripts that draw them
 
 ## References
 
-- Beck, H. E. et al. (2023). High-resolution (1 km) Köppen–Geiger maps for 1901–2099 based on constrained CMIP6 projections. *Scientific Data* 10, 724.
+- Beck, H. E. et al. (2023). High-resolution (1 km) Köppen-Geiger maps for 1901-2099 based on constrained CMIP6 projections. *Scientific Data* 10, 724.
 - Buchhorn, M. et al. (2020). Copernicus Global Land Service: Land Cover 100 m, collection 3.
-- Hersbach, H. et al. (2020). The ERA5 global reanalysis. *Quarterly Journal of the Royal Meteorological Society* 146, 1999–2049.
-- Schroeder, W. et al. (2014). The New VIIRS 375 m active fire detection data product. *Remote Sensing of Environment* 143, 85–96.
+- Hersbach, H. et al. (2020). The ERA5 global reanalysis. *Quarterly Journal of the Royal Meteorological Society* 146, 1999-2049.
+- Schroeder, W. et al. (2014). The New VIIRS 375 m active fire detection data product. *Remote Sensing of Environment* 143, 85-96.
 - Yan, K. et al. (2024). HiQ-LAI: a high-quality reprocessed MODIS leaf area index dataset with better spatiotemporal consistency from 2000 to 2022. *Earth System Science Data* 16.
-- Zhang, T., Zhou, Y., Zhu, Z., Li, X., Asrar, G. R. (2022). A global seamless 1 km resolution daily land surface temperature dataset (2003–2020). *Earth System Science Data* 14, 651–664.
+- Zhang, T., Zhou, Y., Zhu, Z., Li, X., Asrar, G. R. (2022). A global seamless 1 km resolution daily land surface temperature dataset (2003-2020). *Earth System Science Data* 14, 651-664.
 
 Each input dataset remains under its provider's licence.
 

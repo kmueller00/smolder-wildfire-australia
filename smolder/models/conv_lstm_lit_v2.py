@@ -88,7 +88,7 @@ class ConvLSTMLitV2(ConvLSTMLit):
         return logits.reshape(B, T, -1, H, W)[:, :, 0]  # (B, T, H, W)
 
     def forward(self, x: torch.Tensor, x_cat: Optional[torch.Tensor] = None) -> torch.Tensor:
-        """Last-timestep logits (B, 1, H, W) — keeps V1 inference interface."""
+        """Last-timestep logits (B, 1, H, W); keeps V1 inference interface."""
         return self.forward_seq(x, x_cat)[:, -1].unsqueeze(1)
 
     # ------------------------------------------------------------------

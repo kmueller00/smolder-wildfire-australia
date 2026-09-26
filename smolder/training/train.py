@@ -41,7 +41,7 @@ def main():
     val_paths = ["cube_daily_smgrid_2019.zarr"]
     stats_path = str(CHANNEL_STATS)
     if not Path(stats_path).exists():
-        raise FileNotFoundError(f"{stats_path} missing — run compute_channel_stats.py first")
+        raise FileNotFoundError(f"{stats_path} missing; run compute_channel_stats.py first")
 
     pos_weight = float(os.environ.get("POS_WEIGHT", POS_WEIGHT))
     samples_per_epoch = int(os.environ.get("SAMPLES_PER_EPOCH", SAMPLES_PER_EPOCH))

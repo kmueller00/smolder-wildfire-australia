@@ -490,6 +490,15 @@ class DualWindowDataset(Dataset):
                     continue
             break
 
+        return self._build_sample(t_end, y0, x0)
+
+    def sample_at(self, t_end: int, y0: int, x0: int) -> Dict[str, torch.Tensor]:
+        """Sample for a given t_end (continuous day axis; the last fast step
+        forecasts days t_end..t_end+2) and patch corner (y0, x0)."""
+        return self._build_sample(int(t_end), int(y0), int(x0))
+
+    def _build_sample(self, t_end: int, y0: int, x0: int) -> Dict[str, torch.Tensor]:
+        cfg = self.cfg
         self._cur_yx = (y0, x0)
         ci_t, lt_t = self._locate(t_end)
 
