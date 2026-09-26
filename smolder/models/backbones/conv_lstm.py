@@ -337,8 +337,8 @@ class ConvLSTMSegDual(nn.Module):
         static_dim=0,    # extra pointwise path for constant-over-time statics (0=disabled)
         dilation=1,      # grows receptive field ((k-1)*dilation+1 per conv) at CONSTANT
                          # parameter count -- unlike a bigger kernel (kernel=9x9 tripled
-                         # params to 3.7M and collapsed to 0.20 val_ap, see CLAUDE.md
-                         # 2026-07-26), same-padding dilation keeps params identical to
+                         # params to 3.7M and collapsed to 0.20 val_ap in a
+                         # development run), same-padding dilation keeps params identical to
                          # the kernel=5x5 baseline while still widening what each conv sees.
     ):
         super(ConvLSTMSegDual, self).__init__()

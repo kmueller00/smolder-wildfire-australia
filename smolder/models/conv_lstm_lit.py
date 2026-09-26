@@ -140,8 +140,8 @@ class ConvLSTMLit(pl.LightningModule):
         # (and so train_loss curves) directly comparable to non-OHEM runs --
         # measured ratio 1.0000 at every frac. This matters because this
         # training has proven very sensitive to loss-balance shifts (see the
-        # focal-switch crash and the pos_weight-annealing findings in
-        # CLAUDE.md), so ohem_frac should not silently act as a second
+        # focal-switch crash and the pos_weight-annealing findings during
+        # development), so ohem_frac should not silently act as a second
         # pos_weight knob.
         #
         # Caveat, measured not assumed: loss mass and GRADIENT mass cannot both

@@ -133,7 +133,7 @@ class DualPatchConfig:
     # Random flip (east-west mirror) + k*90deg rotation, TRAIN ONLY (val_ds
     # uses deterministic=True, unaffected regardless of this flag). Was never
     # implemented for this datamodule (only the old v1/v2 single-branch one
-    # had it) -- flagged in CLAUDE.md's backlog specifically because of the
+    # had it) -- implemented with care because of the
     # wind u/v / aspect correctness trap _augment below handles explicitly.
     augment: bool = False
     # Probability of blanking the fire_hist_t-3/4/5 + fire_dist channels to 0
@@ -335,8 +335,8 @@ class DualWindowDataset(Dataset):
 
         # Same aspect_sin index but within the STANDALONE static stack (x_static,
         # [agb, lm, (lightning), (elevation), (slope, aspect_sin, aspect_cos)] with
-        # no dynamic-var/doy prefix) -- used by the static head (see CLAUDE.md
-        # 2026-07-25 permutation-importance finding: elevation/lightning/aspect_sin
+        # no dynamic-var/doy prefix) -- used by the static head (permutation
+        # importance during development: elevation/lightning/aspect_sin
         # contribute ~0 through the recurrent branches, most likely because they're
         # constant-over-time values diluted by broadcasting through 14-18 recurrent
         # steps, or because they're spatially near-flat within a patch and a small
@@ -763,7 +763,7 @@ class DualWindowDataset(Dataset):
 
         Two features need explicit handling beyond the plain spatial rot90/
         flip, because a naive transform would silently teach the model wrong
-        wind/terrain associations (the exact risk CLAUDE.md's backlog flagged):
+        wind/terrain associations (a known risk for directional features):
 
         - aspect_sin/aspect_cos encode an ABSOLUTE compass bearing (direction
           the slope faces relative to true North, which does NOT rotate with
