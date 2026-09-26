@@ -446,7 +446,8 @@ class DualWindowDataset(Dataset):
             arr = self.groups[ci][key][lt:lt + take, y0:y0 + self.ph, x0:x0 + self.pw]
             parts.append(np.asarray(arr))
             t += take
-        out = np.concatenate(parts, axis=0) if parts else np.zeros((0, self.ph, self.pw))
+        out = np.concatenate(parts, axis=0) if parts else np.zeros((0, self.ph, self.pw), np.uint8)
+        pad_before = n_days - out.shape[0]      # days before the start of the data: no fire
         if pad_before > 0:
             pad = np.zeros((pad_before, self.ph, self.pw), dtype=out.dtype)
             out = np.concatenate([pad, out], axis=0)
@@ -719,9 +720,9 @@ class DualWindowDataset(Dataset):
                 if mi not in cache:
                     raw = np.asarray(self.fmc_group["fmc"][mi, y0:y0 + self.ph, x0:x0 + self.pw])
                     seen = raw != 255
-                    st = np.asarray(self.fmc_group["staleness"][mi, y0:y0 + self.ph, x0:x0 + self.pw]).astype(np.float32)
+                    stale = np.asarray(self.fmc_group["staleness"][mi, y0:y0 + self.ph, x0:x0 + self.pw]).astype(np.float32)
                     cache[mi] = (np.where(seen, raw / 100.0, 0.0),
-                                 np.where(seen, 1.0 - np.minimum(st, 12.0) / 12.0, 0.0))
+                                 np.where(seen, 1.0 - np.minimum(stale, 12.0) / 12.0, 0.0))
                 fm[j, :, :, 0], fm[j, :, :, 1] = cache[mi]
             x_fast = np.concatenate([x_fast, fm], axis=-1)
 

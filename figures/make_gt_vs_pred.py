@@ -33,8 +33,11 @@ MONTHS = ["January", "February", "March", "April", "May", "June", "July",
           "August", "September", "October", "November", "December"]
 
 OCEAN = "#C9D6E3"
-FIRE = "#A50F15"
-FIRE_OVER = "#0B3D91"
+HATCH = "#3A3A3A"
+plt.rcParams["hatch.color"] = HATCH
+plt.rcParams["hatch.linewidth"] = 1.1
+FIRE_MISS = "#C400FF"    # observed fire outside the top-1% area
+FIRE_HIT = "#00E83A"     # observed fire inside the top-1% area
 RISK = LinearSegmentedColormap.from_list(
     "risk", [PANEL_BG, "#FFE9A8", "#FFAB3D", "#E8452C", "#8B0000"])
 
@@ -134,12 +137,14 @@ def plot():
         nfire = int(truth.sum())
         yy, xx = np.where(truth)
         fx, fy = ext[0] + (xx + 0.5) * PX, ext[3] - (yy + 0.5) * PX
+        hit = top1[yy, xx]
         ocean = np.ma.masked_where(land, np.ones(land.shape))
 
         ax = axes[r, 0]
         ax.imshow(ocean, extent=ext, cmap=LinearSegmentedColormap.from_list("o", [OCEAN, OCEAN]),
                   interpolation="nearest", zorder=0)
-        ax.scatter(fx, fy, s=2.2, c=FIRE, marker="s", linewidths=0, zorder=3)
+        ax.scatter(fx[~hit], fy[~hit], s=2.2, c=FIRE_MISS, marker="s", linewidths=0, zorder=3)
+        ax.scatter(fx[hit], fy[hit], s=2.2, c=FIRE_HIT, marker="s", linewidths=0, zorder=3)
         ax.set_title(f"Observed fire, 3 days after {date}", fontsize=10.5,
                      fontweight="bold", color=INK, pad=6)
         ax.text(0.025, 0.04, f"{nfire} fire pixels", transform=ax.transAxes, fontsize=8.5,
@@ -150,9 +155,14 @@ def plot():
         ax.imshow(ocean, extent=ext, cmap=LinearSegmentedColormap.from_list("o", [OCEAN, OCEAN]),
                   interpolation="nearest", zorder=0)
         im = ax.imshow(pct, extent=ext, cmap=RISK, vmin=0, vmax=100, interpolation="nearest", zorder=1)
-        ax.contour(top1.astype(float), levels=[0.5], colors="#111111", linewidths=0.7,
+        ax.contourf(top1.astype(float), levels=[0.5, 1.5], colors=["white"], alpha=0.45,
+                    extent=ext, origin="upper", zorder=3)
+        ax.contourf(top1.astype(float), levels=[0.5, 1.5], colors="none", hatches=["////"],
+                    extent=ext, origin="upper", zorder=3)
+        ax.contour(top1.astype(float), levels=[0.5], colors=HATCH, linewidths=0.6,
                    extent=ext, origin="upper", zorder=3)
-        ax.scatter(fx, fy, s=1.4, c=FIRE_OVER, marker="s", linewidths=0, alpha=0.85, zorder=3)
+        ax.scatter(fx[~hit], fy[~hit], s=1.6, c=FIRE_MISS, marker="s", linewidths=0, zorder=4)
+        ax.scatter(fx[hit], fy[hit], s=1.6, c=FIRE_HIT, marker="s", linewidths=0, zorder=4)
         ax.set_title(f"SMOLDER risk, issued {date}", fontsize=10.5, fontweight="bold",
                      color=INK, pad=6)
         ax.text(0.025, 0.04, f"{caught}/{nfire} in top-1% area ({100 * caught / max(nfire, 1):.0f}%)",
@@ -171,9 +181,9 @@ def plot():
     cb.set_label("Predicted risk, percentile within the patch", fontsize=9, color=INK)
     cb.ax.tick_params(labelsize=8, colors=INK)
     cb.outline.set_edgecolor(SPINE_COLOR)
-    handles = [Patch(facecolor=FIRE, label="Observed fire"),
-               Patch(facecolor=FIRE_OVER, label="Observed fire (on risk map)"),
-               Patch(facecolor="none", edgecolor="#111111", label="Top-1% risk area"),
+    handles = [Patch(facecolor=FIRE_HIT, label="Observed fire inside the top-1% area"),
+               Patch(facecolor=FIRE_MISS, label="Observed fire outside it"),
+               Patch(facecolor="none", edgecolor=HATCH, hatch="////", label="Top-1% risk area"),
                Patch(facecolor=OCEAN, label="Ocean")]
     fig.legend(handles=handles, loc="lower left", bbox_to_anchor=(0.06, 0.028), ncol=2,
                fontsize=8.6, frameon=True, facecolor="white", edgecolor=MUTED)
