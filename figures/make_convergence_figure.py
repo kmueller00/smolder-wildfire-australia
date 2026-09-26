@@ -22,8 +22,8 @@ xmax = C.epoch.max()
 for ax in (axA, axB):
     ax.axvspan(-0.5, ANNEAL - 0.5, color="white", alpha=0.55, zorder=1, lw=0)
 
-axA.plot(C.epoch, C.train_loss, "o-", color=ACCENT, lw=2.0, ms=4.5, label="training", zorder=4)
-axA.plot(C.epoch, C.val_loss, "s--", color=ACCENT2, lw=1.8, ms=4.2, label="validation (2019)", zorder=4)
+axA.plot(C.epoch, C.train_loss, "-", color=ACCENT, lw=2.0, label="training", zorder=4)
+axA.plot(C.epoch, C.val_loss, "--", color=ACCENT2, lw=1.8, label="validation (2019)", zorder=4)
 lo, hi = min(C.train_loss.min(), C.val_loss.min()), max(C.train_loss.max(), C.val_loss.max())
 axA.set_ylim(np.floor(lo * 5) / 5 - 0.2, np.ceil(hi * 5) / 5 + 0.1)
 axA.set_yticks(np.arange(axA.get_ylim()[0], axA.get_ylim()[1] + 1e-9, 0.2))
@@ -33,7 +33,7 @@ axA.text(ANNEAL / 2 - 0.5, axA.get_ylim()[0] + 0.05, "positive weight\nannealed 
          ha="center", va="bottom", fontsize=8.2, color=MUTED, style="italic")
 axA.legend(fontsize=9, loc="upper right", frameon=True, facecolor="white", edgecolor=MUTED)
 
-axB.plot(C.epoch, C.val_ap, "o-", color=ACCENT, lw=2.0, ms=4.5, zorder=4, label="validation AP (2019)")
+axB.plot(C.epoch, C.val_ap, "-", color=ACCENT, lw=2.0, zorder=4, label="validation AP (2019)")
 swa = C[C.in_swa == 1]
 axB.scatter(swa.epoch, swa.val_ap, s=90, facecolor=ACCENT2, edgecolor="white", linewidth=1.3,
             zorder=5, label="averaged into the released model")

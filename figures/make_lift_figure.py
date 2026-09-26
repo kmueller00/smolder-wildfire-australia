@@ -18,8 +18,8 @@ TPR_ALL = np.array([t["tpr_all"] for t in R["topk"]])
 
 fig = new_figure((10.5, 6.2))
 ax = fig.add_subplot(111)
-ax.plot(KS, LIFT_ALL, "o-", color=ACCENT, lw=2.2, ms=6, label="All fire", zorder=4)
-ax.plot(KS, LIFT_NEW, "o-", color=ACCENT2, lw=2.2, ms=6,
+ax.plot(KS, LIFT_ALL, "-", color=ACCENT, lw=2.2, label="All fire", zorder=4)
+ax.plot(KS, LIFT_NEW, "-", color=ACCENT2, lw=2.2,
         label="New fire (> 3 px from fire in the history window)", zorder=4)
 ax.axhline(1.0, color=MUTED, lw=1.3, ls=(0, (4, 3)), zorder=2)
 ax.text(0.0105, 1.12, "random", fontsize=8.6, color=MUTED, style="italic")
