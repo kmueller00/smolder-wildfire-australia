@@ -1342,6 +1342,127 @@ not a recombination of existing channels.
    Silent corruption, caught only by the eventual bounds error. The script now
    refuses to run when the store's month count does not match.
 
+## FMC (monthly), FFDI+weekly-FMC combo, and a ranking loss -- three more results never written up (2026-08-29/30)
+
+These landed at the tail of the 2026-08-28/30 session and were reported to the
+user in chat but never recorded here. Written up now from the saved logs so
+the file matches what was actually found.
+
+### FMC-monthly alone: small real-test AUC-PR gain, lift unmoved
+`smolder_ps384_combo_fmc` (job 1796661, combo recipe + `USE_FMC=1
+FMC_STORE=fmc_monthly.zarr`): val_ap 0.5109 @ep22 (+1.2% vs the 25-epoch combo
+reference 0.5046). Real 2020 test (job 1797140): **AUC-PR 0.4452** (+1.9% vs
+`ps384_final`'s matched-budget 0.4368), ROC-AUC 0.9008-0.9021, but
+**new-fire lift @0.5% = 12.8x** -- essentially flat vs the 12.6x baseline and
+FFDI's own 12.9x, well below the incumbent's 14.5x. Same pattern as FFDI: a
+real, transferring AUC-PR gain that leaves the operating point untouched.
+
+### FFDI + weekly forward-filled FMC, 40 epochs: highest val_ap ever, but no real gain
+`smolder_ps384_ffdi_fmcweeklyff_40ep` (job 1796878, chained after a causal
+forward-fill of the weekly FMC store -- see below): val_ap **0.5209 @ep30**,
+the highest ever recorded on this project (+1.3% vs the resumed 40-epoch
+combo reference 0.5144), still climbing when the run ended (last 4 epochs
+0.518/0.518/0.519/0.519, a plateau not a budget cutoff this time).
+
+Real 2020 test (job 1797897), three checkpoints from the SAME run:
+
+| member | selected by | val_ap | AUC-PR | ROC-AUC | new-fire lift@0.5% |
+|---|---|---|---|---|---|
+| ep30 | val_ap (AUC-PR proxy) | 0.5209 | 0.4442 | 0.9007 | 13.8x |
+| ep31 | lift@0.5% (`bestlift`) | 0.5194 | 0.4462 | 0.9004 | **14.6x** |
+| SWA(30,31,36) | -- | -- | **0.4491** | 0.9008 | 14.5x |
+
+The highest val_ap of the entire project converts to **essentially nothing**
+over the incumbent (0.4491/14.5x vs 0.4485/14.5x -- inside noise). Sixth
+confirmation that a val_ap gain here does not reliably predict real-test
+improvement. The one genuinely new thing: **ep31 (lift-selected) beat ep30
+(AP-selected) on BOTH real AUC-PR and real lift** (+0.45%, +5.8%), despite a
+LOWER val_ap -- the first clean evidence that `val_ap` picked the wrong
+epoch by its own standard on held-out data. Caveat: ep30/ep31 are adjacent
+epochs with a 0.0015 val_ap difference, so some of this is plausibly noise;
+see the ranking-loss run below for a second, contradicting data point.
+
+Weekly FMC build (`build_fmc_weekly.py`) + causal forward-fill
+(`fmc_forward_fill.py`, carries the most recent PRIOR observation up to 8
+weeks, staleness channel instead of n_obs) were built for this run.
+**Correction to an earlier in-session estimate**: land coverage for raw
+weekly FMC is 91.7%, not the ~46% grid-wide figure that was mistakenly
+compared against monthly's land-only 93.8% -- weekly was never far behind
+monthly on land; forward-fill closes it to 100%. Compute nodes on tinyx have
+NO direct outbound internet (curl times out, HTTP 000) but DO reach the
+internet through `http_proxy=http://proxy.nhr.fau.de:80` (`GDAL_HTTP_PROXY`
+must be set separately for GDAL's own curl) -- this download belongs in a
+SLURM job via the proxy, not squatting on the login node.
+
+### Ranking loss (additive pairwise hinge, NOT OHEM): REJECTED, more decisively than OHEM
+Implemented `rank_loss_weight`/`rank_topk_frac`/`rank_margin`/`rank_max_pos`/
+`rank_max_neg` (`conv_lstm_lit.py::_topk_ranking_loss`, `conv_lstm_lit_dual.py
+::training_step`): a per-image pairwise hinge pushing positive logits above
+that image's hardest `rank_topk_frac` negatives, ADDED alongside a completely
+untouched BCE term -- structurally different from OHEM, which reweighted
+BCE's own negative set. Verified numerically before training (6 checks: exact
+no-op when disabled, per-image batch-order invariance, gradient reaches only
+positives + the hardest negatives with exactly zero on easy negatives and
+masked regions, correct margin threshold behaviour, zero-positive images
+contribute nothing). Measured, not assumed: still not immune to shifting the
+pos:neg gradient balance (0.52->0.84 at weight=1.0, comparable to OHEM's own
+shift) but far gentler at the weight actually used (0.52->0.56 at weight=0.05,
+an 8% move vs OHEM's 73%).
+
+`smolder_ps384_combo_rankloss005` (job 1798268, combo recipe +
+`RANK_LOSS_WEIGHT=0.05`): val_ap **0.5220 @ep13** (+3.4%, better than either
+FFDI or FMC-monthly alone), then DECLINED for 6 straight epochs before
+early-stopping (0.495/0.514/0.515/0.516/0.514/0.507) -- the same early-peak-
+then-never-recover shape as `trimmed` and OHEM, both of which won val_ap and
+lost real test.
+
+Real 2020 test (job 1798612) confirms it, more decisively than either prior
+inversion:
+
+| member | selected by | val_ap | AUC-PR | ROC-AUC | new-fire lift@0.5% |
+|---|---|---|---|---|---|
+| ep13 | val_ap | 0.5220 | 0.4358 | **0.8189** | 10.1x |
+| SWA(12,13,17) | -- | -- | 0.4384 | 0.7996 | 9.6x |
+| ep19 | lift@0.5% (`bestlift`) | 0.507 (declining tail) | 0.4440 | 0.8160 | 9.7x |
+| prob-mean | -- | -- | 0.4430 | 0.8205 | 10.1x |
+| rank-mean | -- | -- | 0.4392 | 0.8125 | 9.5x |
+
+**Every variant loses to the incumbent on every metric.** AUC-PR 0.436-0.444
+vs 0.4485 (up to -2.8%); new-fire lift **9.5-10.1x vs 14.5x, a 30-35% real
+collapse** -- worse even than `ps384_final`'s original pre-session 11.9x;
+ROC-AUC **0.80-0.82 vs 0.8983-0.9008**, an 8-10 point collapse far larger than
+the AUC-PR drop alone suggests, meaning broad ranking quality degraded much
+more than the top-heavy metrics show. This is a sharper val_ap-vs-test
+inversion than OHEM's own (which still managed ROC-AUC 0.837-0.847).
+
+**And it contradicts the lift-selection result above**: here the
+`bestlift`-selected checkpoint (ep19) did NOT win on real lift (9.7x, behind
+member0's 10.1x) despite winning on real AUC-PR (0.4440, the best of the
+three). So across the two available data points, "select on lift instead of
+val_ap" has won once (FFDI+FMC run: 14.6x > 13.8x) and lost once (this run:
+9.7x < 10.1x) on the metric it was supposed to help with. **Not yet a
+reliable rule** -- treat `bestlift` checkpoints as a candidate to always
+real-test alongside the `val_ap` one, not as a replacement selection
+criterion.
+
+`rank_loss_weight=0.0` (default) remains off; the code stays available (e.g.
+for a smaller weight or margin) but this configuration is rejected.
+
+**Running total of val_ap-vs-real-test inversions this project has now
+produced**: `trimmed` (+4% val, real test lost), OHEM (best val ever, worst
+real test), this ranking loss (+3.4% val, worst real test of anything tried).
+All three share the same signature: an early peak that never gets
+re-approached, unlike every result that DID transfer (`ps384_final`,
+`newfiresample_fhdropout_combo`, the resume/SWA lineage), which climbed
+steadily to their peak across many more epochs. This shape -- not the val_ap
+number itself -- is now the best available warning sign that a result won't
+transfer.
+
+**`SWA(resume ep28,29,30)` (job 1764897) remains the best model of the
+project**: 2020 test AUC-PR=0.4485, ROC-AUC=0.8983, new-fire lift=14.5x@0.5%.
+Nothing tried since -- FFDI, FMC (monthly or weekly), their combination at 40
+epochs, or an additive ranking loss -- has beaten it on real 2020 test data.
+
 ## Pitfalls
 - v1 `conv_lstm_lit.py` had a recency-weights bug (never applied on channels-first
   input) — fixed 2026-07-14; backup at `conv_lstm_lit.py.bak_pre_recencyfix`.

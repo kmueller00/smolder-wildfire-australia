@@ -11,8 +11,11 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.patches import FancyArrowPatch, FancyBboxPatch, Rectangle
+from style_smolder import ACCENT, ACCENT2, INK
 
-SLOW = "#2b6cb0"; FAST = "#dd6b20"; FUSE = "#6b46c1"; OUT = "#c53030"; INK = "#1a202c"
+# Same primary/secondary accents as every other figure in the repo (house
+# style), plus two roles unique to this diagram (the fusion step, the output).
+SLOW = ACCENT; FAST = ACCENT2; FUSE = "#6b46c1"; OUT = "#c53030"
 
 fig, ax = plt.subplots(figsize=(14.5, 8.0))
 ax.set_xlim(0, 15.2); ax.set_ylim(-0.75, 8.35); ax.axis("off")
