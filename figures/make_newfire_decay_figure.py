@@ -1,78 +1,56 @@
-"""How SMOLDER's lift depends on distance from the nearest recent fire.
+"""How the new-fire lift depends on the distance threshold that defines "new"
+(results/newfire_sweep_2020.json, written by
+smolder.evaluation.newfire_definition_sweep)."""
+import json
+import os
 
-Single model (the incumbent, SWA(resume ep28,29,30)). Two things this answers
-about the model's own headline number, not a second model:
-  (a) how much of what a fixed radius calls "new fire" is actually within
-      that radius of a fire that was already burning, and
-  (b) how the model's own enrichment falls off as that radius widens.
-
-Numbers are hardcoded from newfire_definition_sweep.py's evaluation logs
-(job 1765273, 600 patches, 2020 hold-out) so the figure regenerates without a
-GPU or the data cubes.
-"""
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 from style_smolder import ACCENT, ACCENT2, INK, MUTED, new_figure, style_axes
 
-RADII      = np.array([0, 1, 3, 5, 10, 20, 40])
-LIFT_3D    = np.array([53.0, 33.0, 11.1, 3.4, 0.1, 0.1, 0.2])
-LIFT_30D   = np.array([53.3, 34.1, 12.1, 3.7, 0.1, 0.2, 0.8])
-SHARE_3D   = np.array([59.7, 48.2, 35.7, 29.6, 20.9, 11.5, 4.8])
-SHARE_30D  = np.array([57.2, 42.6, 26.0, 18.3, 9.8, 3.9, 1.5])
+HERE = os.path.dirname(os.path.abspath(__file__))
+S = json.load(open(os.path.join(HERE, "..", "results", "newfire_sweep_2020.json")))
+RADII = np.array(S["radii_px"])
+lift = next(iter(S["lift"].values()))
+SHOW = ((1, "1 history window", ACCENT, "o-"), (30, "30 history windows", ACCENT2, "o--"))
 
 fig = new_figure((12.6, 5.1))
 axA = fig.add_subplot(121)
 axB = fig.add_subplot(122)
-
-axA.plot(RADII, LIFT_3D, "o-", color=ACCENT, lw=2.1, ms=6.5, label="3-day history window")
-axA.plot(RADII, LIFT_30D, "o--", color=ACCENT2, lw=1.8, ms=5.5, label="30-day history window")
+for w, lab, col, sty in SHOW:
+    y = np.array([np.nan if v is None else v for v in lift[str(w)]], float)
+    axA.plot(RADII, y, sty, color=col, lw=2.0, ms=6, label=lab)
+    axB.plot(RADII, S["share_new_pct"][str(w)], sty, color=col, lw=2.0, ms=6, label=lab)
 axA.axhline(1.0, color=MUTED, lw=1.2, ls=(0, (4, 3)))
-axA.text(0.6, 1.5, "random", fontsize=8.4, color=MUTED, style="italic")
-axA.annotate("the r ≥ 3 px point behind\nthe 14.5× headline figure",
-             xy=(3, 11.1), xytext=(9, 24), fontsize=8.7, fontweight="bold",
-             color=ACCENT, arrowprops=dict(arrowstyle="-|>", color=ACCENT, lw=1.2))
+axA.text(30.5, 1.12, "random", fontsize=8.4, color=MUTED, style="italic")
 axA.set_yscale("log")
-axA.set_xlim(-1.5, 41.5)
-axA.set_ylim(0.06, 90)
-axA.set_xticks([0, 5, 10, 20, 30, 40])
-axA.set_xlabel("Minimum distance from any recent fire (px ≈ km)",
-               fontsize=10.3, fontweight="bold", color=INK)
-axA.set_ylabel("Lift at top 0.5% (log scale)", fontsize=10.3, fontweight="bold", color=INK)
-style_axes(axA)
-axA.legend(fontsize=8.6, loc="upper right", frameon=True, facecolor="white", edgecolor=MUTED)
-axA.set_title("Enrichment falls off with distance", fontsize=12, fontweight="bold", color=INK)
-
-axB.plot(RADII, SHARE_3D, "o-", color=ACCENT, lw=2.1, ms=6.5, label="3-day history window")
-axB.plot(RADII, SHARE_30D, "o--", color=ACCENT2, lw=1.8, ms=5.5, label="30-day history window")
-axB.annotate(f"{SHARE_3D[2]:.0f}%", xy=(3, SHARE_3D[2]), xytext=(10, 46),
-             fontsize=9.5, fontweight="bold", color=ACCENT,
-             arrowprops=dict(arrowstyle="-|>", color=ACCENT, lw=1.2))
-axB.annotate(f"{SHARE_30D[5]:.0f}%", xy=(20, SHARE_30D[5]), xytext=(26, 16),
-             fontsize=9.5, fontweight="bold", color=ACCENT2,
-             arrowprops=dict(arrowstyle="-|>", color=ACCENT2, lw=1.2))
-axB.set_xlim(-1.5, 41.5)
-axB.set_ylim(0, 65)
-axB.set_xticks([0, 5, 10, 20, 30, 40])
-axB.set_xlabel("Minimum distance from any recent fire (px ≈ km)",
-               fontsize=10.3, fontweight="bold", color=INK)
-axB.set_ylabel("Fire pixels meeting the threshold (%)", fontsize=10.3,
+vals = [v for w, *_ in SHOW for v in lift[str(w)] if v]
+lo, hi = min(min(vals), 1.0) / 2, max(vals) * 2
+axA.set_ylim(lo, hi)
+yt = [v for v in (0.01, 0.03, 0.1, 0.3, 1, 3, 10, 30, 100) if lo <= v <= hi]
+axA.set_yticks(yt); axA.set_yticklabels([f"{v:g}" for v in yt])
+axA.set_ylabel(f"New-fire lift at top {100*S['report_k']:g}% (log scale)", fontsize=10.3,
                fontweight="bold", color=INK)
-style_axes(axB)
-axB.legend(fontsize=8.6, loc="upper right", frameon=True, facecolor="white", edgecolor=MUTED)
-axB.set_title("How much fire counts as “new”, by radius", fontsize=12,
-              fontweight="bold", color=INK)
-
-fig.suptitle("What a distance threshold changes, 2020 hold-out test year",
+axA.set_title("Lift falls with distance from recent fire", fontsize=12, fontweight="bold", color=INK)
+axB.set_ylim(0, 100)
+axB.set_ylabel("Fire pixels counted as new (%)", fontsize=10.3, fontweight="bold", color=INK)
+axB.set_title("How much fire counts as new", fontsize=12, fontweight="bold", color=INK)
+for ax in (axA, axB):
+    ax.set_xlim(-1.5, 41.5)
+    ax.set_xticks([0, 5, 10, 20, 30, 40])
+    ax.set_xlabel("Minimum distance from fire in the history (px ≈ km)",
+                  fontsize=10.3, fontweight="bold", color=INK)
+    style_axes(ax)
+    ax.legend(fontsize=8.6, loc="upper right", frameon=True, facecolor="white", edgecolor=MUTED)
+fig.suptitle("New-fire lift depends on how “new” is defined, 2020 hold-out year",
              fontsize=14, fontweight="bold", color=INK, y=1.03)
 fig.text(0.5, -0.05,
-         "At the conventional 3 px / 3-day threshold, 35.7% of fire pixels qualify as “new” and the model "
-         "still shows real skill (14.5×). Widening the radius to 20 px drops that to 3.9% of pixels and the "
-         "model's own enrichment there falls to ≈1× (random) — near-field spread is where this model has "
-         "demonstrated skill; genuinely isolated new ignition is not.",
+         f"{S['n_patches']} fire-active patches. A history window is one 3-day block of VIIRS detections ending on the "
+         "issue day; 30 windows cover the preceding 32 days. Fire within the radius counts as known.",
          ha="center", fontsize=9, color=MUTED, style="italic", wrap=True)
-
 fig.tight_layout()
-fig.savefig("fig_newfire_distance_decay.png", dpi=300, bbox_inches="tight", facecolor="white")
+fig.savefig(os.path.join(HERE, "fig_newfire_distance_decay.png"), dpi=300, bbox_inches="tight",
+            facecolor="white")
 print("wrote fig_newfire_distance_decay.png")

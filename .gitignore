@@ -1,7 +1,9 @@
 .DS_Store
+__pycache__/
+*.pyc
+*.egg-info/
+*.zarr/
+*.npy
 lightning_logs/
 logs/
-*.npy
-*.pyc
-__pycache__/
-*.zarr/
+runs/

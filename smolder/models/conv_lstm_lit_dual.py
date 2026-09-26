@@ -1,24 +1,12 @@
-"""Dual-branch Lightning module: separate temporal encoders for slow and fast predictors.
+"""SMOLDER Lightning module: two ConvLSTM encoders fused by cross-attention.
 
-Extends ConvLSTMLitV2 (deep supervision + cosine LR) but swaps the single
-ConvLSTMSeg backbone for ConvLSTMSegDual, which runs one ConvLSTM over a long
-coarse window (LAI/SM/PPT, 144d @ 8-day bins) and another over a short daily
-window (VPD/LST/WIND, 14d), fusing their final hidden states before the head.
-
-Motivation: lagged_skill_extended_agg.csv (6 years, patched cubes, lags 0-180)
-shows LAI peaks at lag 130, SM/PPT at 150, while VPD peaks at lag 0 and LST at
-10. A single 30-day window is far too short for the first group and too long for
-the second, and the unified model provably hits a validation ceiling after ~1
-epoch with train loss still falling -- i.e. it has extracted what a 30-day
-window contains.
-
-Deep supervision runs on the **fast branch's axis**, which is daily, so y[t]
-aligns with it exactly. The slow branch's final hidden state is broadcast across
-those timesteps. This keeps deep supervision (a v2 feature) so dual-vs-unified
-differs in one variable -- the temporal encoding -- rather than two.
-
-Metrics/validation logging are inherited unchanged from the parent so results
-stay directly comparable to focal30v2_* and focal30v2_unified.
+The slow encoder reads the 144-day / 8-day-bin window, the fast encoder the
+14-day daily window. At every fast timestep the fast hidden state queries the
+slow encoder's final state (multi-head cross-attention, per pixel), and a 1x1
+head produces fire logits. The head is applied at every fast timestep (deep
+supervision, auxiliary weight 0.3); predictions use the last timestep.
+Training losses, the pos_weight schedule and validation metrics are inherited
+from ConvLSTMLitV2 / ConvLSTMLit.
 """
 import logging
 from typing import Any, Dict, Optional
@@ -26,8 +14,8 @@ from typing import Any, Dict, Optional
 import torch
 import torch.nn as nn
 
-from conv_lstm_lit_v2 import ConvLSTMLitV2
-from seasfire.backbones.conv_lstm import ConvLSTMSegDual
+from smolder.models.conv_lstm_lit_v2 import ConvLSTMLitV2
+from smolder.models.backbones.conv_lstm import ConvLSTMSegDual
 
 logger = logging.getLogger(__name__)
 

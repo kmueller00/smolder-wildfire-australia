@@ -1,29 +1,20 @@
-"""Dual-branch datamodule: separate slow and fast temporal windows.
+"""SMOLDER data pipeline: patches with a slow and a fast temporal window.
 
-Why this exists (see figures/ + lagged_skill_extended_agg.csv, 2026-07-15):
-predictors carry information on very different time scales. LAI peaks at lag
-130, SM/PPT at lag 150, while VPD peaks at lag 0 and LST at lag 10 (both
-collapsing to ~0.45 by 90 days). A single uniform 30-day window is far too
-short for the first group and too long for the second.
+For a target day t and a PATCH x PATCH window, each sample holds
+  x_slow  (18, H, W, C)  LAI, soil moisture, precipitation over 144 days in
+                         8-day bins (from the pre-binned cube_slow_8day.zarr),
+                         plus broadcast statics and day-of-year (sin, cos)
+  x_fast  (14, H, W, C)  VPD, land-surface temperature, wind over 14 days,
+                         plus the same statics, day-of-year, and fire history
+                         (fire at t-3, t-4, t-5 and exp(-distance/5 px) to fire
+                         at t-3; nothing later than t-3 is ever read)
+  x_cat   (H, W, 2)      land cover and Koppen-Geiger class (embedded in-model)
+  y       (14, H, W)     next-3-day fire occurrence for every fast-window day
+  mask    (H, W)         land mask
 
-Two differences from zarr_daily_datamodule_v2.py that force a separate module:
-
-1. **Continuous time axis across years.** A 144-day slow window crosses year
-   boundaries, so this opens every cube and indexes one 2192-day axis
-   (2015-2020) rather than one dataset per year. Verified safe: the year
-   boundary shows no discontinuity (mean |Dec31->Jan1| step is within normal
-   day-to-day variability for every channel).
-
-2. **agb is taken from the target day's cube.** Defensive only: agb turns out to
-   be byte-identical across years on every finite land pixel (an earlier claim
-   that it differed on 51% of pixels was an artifact of NaN != NaN; agb is NaN
-   over ocean, which is exactly 51.26% of the grid). Resolving it per-target
-   costs nothing and stays correct if annual biomass is ever wired up properly.
-
-Emits x_slow (T_slow, ph, pw, C_slow) and x_fast (T_fast, ph, pw, C_fast).
-NDVI is dropped: it correlates 0.795 with LAI and adds nothing for the target
-(LAI alone 0.771 AUC, NDVI+LAI 0.770, all three worse). AGB is kept — it is the
-least redundant of the three and costs no timestep.
+All cubes are indexed on one continuous 2015-2020 day axis, so windows can
+cross year boundaries. Inputs are standardised with channel_stats_2015_2018.json
+(training years only). NDVI is present in the full cubes but not read.
 """
 from dataclasses import dataclass
 from pathlib import Path
@@ -36,9 +27,11 @@ import torch
 from torch.utils.data import DataLoader, Dataset
 import lightning.pytorch as pl
 
-from zarr_daily_datamodule_v2 import open_zarr_root
+from smolder.data.io import data_dir, open_zarr_root, resolve_stats
 
-# X channel order in the cubes: [sm, wind, vpd, precip, lst_day, ndvi, lai]
+# Channel order of the 7-channel training cubes and of channel_stats_2015_2018.json:
+# [sm, wind, vpd, precip, lst_day, ndvi, lai]. Cubes that carry a `channels`
+# attribute (e.g. the NDVI-free Zenodo archive) are read by name instead.
 CH = {"SM": 0, "WIND": 1, "VPD": 2, "PPT": 3, "LST": 4, "NDVI": 5, "LAI": 6}
 
 # NDVI (5) deliberately absent: redundant with LAI, see module docstring.
@@ -207,7 +200,7 @@ class DualWindowDataset(Dataset):
         self.wind_cache: Dict[int, Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]] = {}
         self.cube_year: Dict[int, int] = {}
         if self.use_wind_dir:
-            wind_dir = os.path.join(os.path.dirname(os.path.abspath(cfg.stats_path)), "aux_rasters", "wind_dir")
+            wind_dir = str(data_dir() / "aux_rasters" / "wind_dir")
             for ci, p in enumerate(cfg.zarr_paths):
                 year = int(Path(str(p)).stem.split("_")[-1])
                 self.cube_year[ci] = year
@@ -217,7 +210,7 @@ class DualWindowDataset(Dataset):
                     self.wind_cache[year] = (d["u"], d["v"], d["lat"], d["lon"])
 
         # ---- normalization ----
-        stats = json.loads(Path(cfg.stats_path).read_text())
+        stats = json.loads(resolve_stats(cfg.stats_path).read_text())
         x_mean = np.asarray(stats["x_mean"], dtype=np.float32)
         x_std = np.asarray(stats["x_std"], dtype=np.float32)
         x_std = np.where(x_std < 1e-6, 1.0, x_std)
@@ -225,6 +218,18 @@ class DualWindowDataset(Dataset):
         self.fast_idx = [CH[c] for c in FAST_CHANNELS]
         self.slow_mean, self.slow_std = x_mean[self.slow_idx], x_std[self.slow_idx]
         self.fast_mean, self.fast_std = x_mean[self.fast_idx], x_std[self.fast_idx]
+        # Positions to READ from the cube's X array. Identical to the stats
+        # positions for 7-channel cubes; looked up by name when the cube says
+        # which channels it holds.
+        names = g0.attrs.get("channels")
+        if names:
+            alias = {"sm": "SM", "wind": "WIND", "vpd": "VPD", "precip": "PPT",
+                     "lst_day": "LST", "ndvi": "NDVI", "lai": "LAI"}
+            cube_ch = {alias[n]: i for i, n in enumerate(names)}
+        else:
+            cube_ch = CH
+        self.read_slow_idx = [cube_ch[c] for c in SLOW_CHANNELS]
+        self.read_fast_idx = [cube_ch[c] for c in FAST_CHANNELS]
         self.agb_mean = float(stats["agb_mean"])
         self.agb_std = float(stats["agb_std"]) or 1.0
 
@@ -466,7 +471,7 @@ class DualWindowDataset(Dataset):
                 continue
             if not force_pos and not force_new_fire:
                 break
-            ci, lt = self._locate(t_end)
+            ci, lt = self._locate(t_end - 1)      # last-step target: y_fire_3d[t_end-1]
             y_chk = self.groups[ci][cfg.y_key][lt, y0:y0 + self.ph, x0:x0 + self.pw]
             # Count LAND fire only: y_fire_3d labels ocean as y=1 (98.6% of ocean
             # pixels), so a raw (y>0).sum() accepts pure seawater as a "fire"
@@ -476,7 +481,7 @@ class DualWindowDataset(Dataset):
             if force_pos and int(y_land.sum()) < max(1, min_pos):
                 continue
             if force_new_fire:
-                tg3 = t_end - 3
+                tg3 = t_end - 1 - 3                # newest fire-history window of the last step
                 if tg3 < 0:
                     continue
                 ci3, lt3 = self._locate(tg3)
@@ -506,7 +511,7 @@ class DualWindowDataset(Dataset):
             )
         else:
             # Fallback: aggregate raw days on the fly (correct, ~22x slower).
-            raw_slow = self._read_span(t_end, cfg.slow_days, self.slow_idx)
+            raw_slow = self._read_span(t_end, cfg.slow_days, self.read_slow_idx)
             raw_slow = np.nan_to_num(raw_slow, nan=0.0, posinf=0.0, neginf=0.0)
             binned = raw_slow.reshape(self.t_slow, cfg.slow_bin, self.ph, self.pw, len(self.slow_idx))
             x_slow = np.where(
@@ -538,7 +543,7 @@ class DualWindowDataset(Dataset):
             x_vslow = (x_vslow - vm[None,None,None,:]) / vs[None,None,None,:]
 
         # ---- fast branch: daily ----
-        x_fast = self._read_span(t_end, cfg.fast_days, self.fast_idx)
+        x_fast = self._read_span(t_end, cfg.fast_days, self.read_fast_idx)
         x_fast = np.nan_to_num(x_fast, nan=0.0, posinf=0.0, neginf=0.0)
         x_fast = (x_fast - self.fast_mean[None, None, None, :]) / self.fast_std[None, None, None, :]
 
@@ -588,33 +593,36 @@ class DualWindowDataset(Dataset):
             x_vslow = _append_statics(x_vslow, n_v, v_axis)
         x_fast = _append_statics(x_fast, self.t_fast, fast_days_axis)
 
-        # ---- leakage-free fire history on the FAST branch ----
-        # Target covers t_end+1..t_end+3, so y_fire_3d[t_end-lag] with lag>=3
-        # ends at or before t_end -- strictly past. Ocean is labelled fire=1 in
-        # the cube, so mask it. This was the single largest gain on the unified
-        # model (AUC-PR 0.003 -> 0.11), and the dual model previously had no
-        # access to it at all.
+        # ---- fire history on the FAST branch, per timestep ----
+        # y_fire_3d[s] = fire on days s+1..s+3, and fast step j is trained on
+        # target y_fire_3d[s_j] with s_j = t_end - t_fast + j. Its history uses
+        # y_fire_3d[s_j - L] for L in fire_history_lags; L >= 3 means the newest
+        # history window ends on day s_j, the day before that step's target
+        # window starts, so no step ever sees fire from inside its own target.
         if getattr(cfg, "fire_history", False):
-            lags = getattr(cfg, "fire_history_lags", None) or [int(getattr(cfg, "fire_history_lag", 3))]
-            chans = []
-            for lg in lags:
-                tg = t_end - lg
-                if tg >= 0:
-                    ci_h, lt_h = self._locate(tg)
-                    fh = (np.asarray(self.groups[ci_h][cfg.y_key][lt_h, y0:y0 + self.ph, x0:x0 + self.pw]) > 0
-                          ).astype(np.float32) * lm_p
-                else:
-                    fh = np.zeros((self.ph, self.pw), np.float32)
-                chans.append(fh)
+            lags = list(getattr(cfg, "fire_history_lags", None) or [int(getattr(cfg, "fire_history_lag", 3))])
+            if min(lags) < 3:
+                raise ValueError(f"fire_history_lags must all be >= 3, got {lags}")
+            T = self.t_fast
+            first = t_end - T - max(lags)            # oldest history index needed (step 0)
+            span_end = t_end - 1 - min(lags) + 1     # exclusive end (last step, smallest lag)
+            span = (self._read_y_span(span_end, span_end - first, cfg.y_key) > 0).astype(np.float32)
+            span *= lm_p[None]
+            fh = np.empty((T, self.ph, self.pw, len(lags)), np.float32)
+            for j in range(T):
+                s_j = t_end - T + j
+                for k, lg in enumerate(lags):
+                    fh[j, :, :, k] = span[s_j - lg - first]
+            chans = [fh]
             if getattr(cfg, "fire_history_distance", False):
                 from scipy import ndimage
-                b0m = chans[0]
-                dist = (np.exp(-ndimage.distance_transform_edt(b0m < 0.5) / 5.0).astype(np.float32)
-                        if b0m.any() else np.zeros((self.ph, self.pw), np.float32))
+                dist = np.zeros((T, self.ph, self.pw, 1), np.float32)
+                for j in range(T):
+                    recent = fh[j, :, :, 0] > 0.5
+                    if recent.any():
+                        dist[j, :, :, 0] = np.exp(-ndimage.distance_transform_edt(~recent) / 5.0)
                 chans.append(dist)
-            fh_stack = np.stack(chans, axis=-1)                       # (ph,pw,n)
-            fh_fast = np.broadcast_to(fh_stack[None], (self.t_fast, self.ph, self.pw, fh_stack.shape[-1]))
-            x_fast = np.concatenate([x_fast, np.ascontiguousarray(fh_fast.astype(np.float32))], axis=-1)
+            x_fast = np.concatenate([x_fast] + chans, axis=-1).astype(np.float32)
 
         # ---- fuel age: days since this pixel last had fire (leakage-free) ----
         # Different from fire_history above (short-range, 3-5 day proximity-in-
@@ -625,7 +633,7 @@ class DualWindowDataset(Dataset):
         # ranked 9/18 by SHAP, right behind elevation. See aux_xgb_check.py.
         if self.use_fuel_age:
             LB = self.fuel_age_lookback
-            hist = self._read_y_span(t_end - 3, LB, cfg.y_key) > 0   # (LB,ph,pw)
+            hist = self._read_y_span(t_end - 3, LB, cfg.y_key) > 0   # ends at y_fire_3d[t_end-4]
             idx = np.arange(hist.shape[0])[:, None, None]
             last_idx = np.where(hist, idx, -1).max(axis=0)
             fuel_age = np.where(last_idx >= 0, (hist.shape[0] - 1 - last_idx), LB).astype(np.float32)
@@ -642,7 +650,7 @@ class DualWindowDataset(Dataset):
         # downwind_align in [-1,1]: +1 = wind blows FROM recent fire directly
         # TOWARD this pixel. See aux_xgb_check_wind.py.
         if self.use_wind_dir:
-            tg3 = t_end - 3
+            tg3 = t_end - 1 - 3
             ci_h3, lt_h3 = self._locate(tg3)
             fh3_wd = (np.asarray(self.groups[ci_h3][cfg.y_key][lt_h3, y0:y0 + self.ph, x0:x0 + self.pw]) > 0)
             from scipy import ndimage as _ndi

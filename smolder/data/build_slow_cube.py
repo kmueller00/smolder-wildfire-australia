@@ -31,8 +31,8 @@ Writes cube_slow_8day.zarr with:
   bin_start_day (n_bins,)   int32, first day of each bin on the continuous axis
   year_of_bin  (n_bins,)    int32, source year (for provenance)
 
-Usage:  python build_slow_cube.py            # all years
-        YEARS=2015,2016 python build_slow_cube.py
+Usage:  SMOLDER_DATA=/path/to/cubes python -m smolder.data.build_slow_cube            # all years
+        YEARS=2015,2016 SMOLDER_DATA=/path/to/cubes python -m smolder.data.build_slow_cube
 """
 import os
 from pathlib import Path
@@ -40,7 +40,9 @@ from pathlib import Path
 import numpy as np
 import zarr
 
-SCRIPT_DIR = Path(__file__).resolve().parent
+from smolder.data.io import data_dir
+
+SCRIPT_DIR = data_dir()   # cubes are read from / written to $SMOLDER_DATA
 OUT = SCRIPT_DIR / "cube_slow_8day.zarr"
 
 # X channel order: [sm, wind, vpd, precip, lst_day, ndvi, lai]

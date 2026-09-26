@@ -1,71 +1,45 @@
-"""Dual-branch training: variable-specific temporal encoders, unified over landcover.
+"""Train SMOLDER (dual-branch ConvLSTM, next-3-day fire occurrence).
 
-What differs from train_convlstm_30day_v2_unified.py (the comparison baseline):
-ONLY the temporal encoding. Same cubes, same normalization, same loss schedule,
-same pos_weight=350, same samples_per_epoch=2000, same deep supervision, same
-cosine LR, landcover still an input embedding (emb_dim_lc=6) rather than a split.
+Every setting is read from environment variables; configs/smolder.env holds
+the exact values of the released model, verified against the hyperparameters
+stored in its checkpoint. Typical use, from the repository root:
 
-The change:
-  slow branch  LAI, SM, PPT    144 days @ 8-day bins  -> 18 steps
-  fast branch  VPD, LST, WIND   14 days @ daily       -> 14 steps
+    set -a; source configs/smolder.env; set +a
+    SMOLDER_DATA=/path/to/cubes python -m smolder.training.train
 
-Grounded in lagged_skill_extended_agg.csv (6 years, patched cubes, lags 0-180):
-LAI peaks at lag 130 (AUC 0.779), SM at 150 (0.653), PPT at 150 (0.585), while
-VPD peaks at lag 0 (0.572) and LST at 10 (0.559), both collapsing to ~0.45 by
-90 days. The production 30-day window sees SM at ~0.52 of an available 0.65.
-
-NDVI is dropped: it correlates 0.795 with LAI and adds nothing for the target
-(LAI alone 0.771 AUC, NDVI+LAI 0.770, all three 0.765). AGB is kept as a static
--- it is the least redundant of the three and costs no timestep.
-
-FAST PROTOTYPE variant: cheap single-run testbed for two ideas before spending
-real GPU hours on a full generation --
-  1. pos_weight annealing (POS_WEIGHT_START/END/ANNEAL_EPOCHS): pos_weight=100
-     buys ranking/recall at the cost of calibration (raw sigmoid compressed into
-     ~0.65-0.75 almost everywhere, fixed post-hoc via fit_recalibration.py).
-     Annealing it down over training is the training-time alternative.
-  2. isolation-weighted loss (ISOLATION_GAMMA/KERNEL): permutation importance
-     showed this model's #1 feature is distance-to-recent-fire with weather
-     near zero -- it has learned "fire near fire" and has ~no signal for
-     isolated new ignitions (new-fire lift is below random under 0.2%).
-     Upweights loss on positives that are spatially isolated in the CURRENT
-     target, forcing gradient attention onto exactly that blind spot.
-Uses patch_size=128 (fastest, already the best patch-size-sweep result) with
-reduced samples_per_epoch/max_epochs for a cheap single-seed prototype -- NOT
-a publishable comparison, just "is this worth a real run".
-
-Run tag: dual_fastproto
+Data: train 2015-2018, validation 2019 (checkpoint selection and early
+stopping on validation average precision). The 2020 test year is never read.
+Outputs go to $SMOLDER_RUNS/<RUN_TAG>/job_<SLURM_JOB_ID or "local">/.
 """
 from pathlib import Path
 
 import os, sys
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import lightning.pytorch as pl
 from lightning.pytorch.loggers import CSVLogger
 from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping, LearningRateMonitor
 
-from conv_lstm_lit_dual import ConvLSTMLitDual
-from zarr_dual_datamodule import DualDataModule, SLOW_CHANNELS, FAST_CHANNELS
+from smolder.models.conv_lstm_lit_dual import ConvLSTMLitDual
+from smolder.data.io import CHANNEL_STATS, resolve
+from smolder.data.zarr_dual_datamodule import DualDataModule, SLOW_CHANNELS, FAST_CHANNELS
 
-SCRIPT_DIR = Path(__file__).resolve().parent
-MAX_EPOCHS = 12      # fast prototype: patience=6 stopped every prior run by ~ep13-14 anyway
+MAX_EPOCHS = 25
 
 SLOW_DAYS = 144      # inside the measured 130-150 saturation band; divides by 8
 SLOW_BIN = 8         # native cadence of LAI (8-day composites)
 FAST_DAYS = 14
 
-# Match the split and unified runs exactly. Do NOT set this from the neg:pos
-# ratio -- that was tried (job 1747766, pos_weight=1905) and saturated the model
-# (val_p_mean 0.28 vs a 0.0005 base rate), freezing the score from epoch 0.
-POS_WEIGHT = 100.0   # matches dual_fh_attn (job 1755283), the production checkpoint
-SAMPLES_PER_EPOCH = 800   # fast prototype: 1/2.5 of the production 2000
+# Setting pos_weight to the raw neg:pos ratio (~1900) saturates the output from
+# epoch 0; 100 annealed to 20 is used instead (see configs/smolder.env).
+POS_WEIGHT = 100.0
+SAMPLES_PER_EPOCH = 2000
 
 
 def main():
-    train_paths = [str(SCRIPT_DIR / f"cube_daily_smgrid_{y}.zarr") for y in (2015, 2016, 2017, 2018)]
-    val_paths = [str(SCRIPT_DIR / "cube_daily_smgrid_2019.zarr")]
-    stats_path = str(SCRIPT_DIR / "channel_stats_2015_2018.json")
+    # Cube names are resolved against $SMOLDER_DATA (see smolder/data/io.py).
+    train_paths = [f"cube_daily_smgrid_{y}.zarr" for y in (2015, 2016, 2017, 2018)]
+    val_paths = ["cube_daily_smgrid_2019.zarr"]
+    stats_path = str(CHANNEL_STATS)
     if not Path(stats_path).exists():
         raise FileNotFoundError(f"{stats_path} missing — run compute_channel_stats.py first")
 
@@ -87,7 +61,7 @@ def main():
     # and a 384px patch a 2.25x easier one, confounding patch size with sampling
     # difficulty. Baseline (256, 20px) is preserved exactly when PATCH_SIZE=256.
     BASE_PATCH, BASE_MIN_POS = 256, 20
-    patch_size = int(os.environ.get("PATCH_SIZE", 128))   # fast prototype default: 128px
+    patch_size = int(os.environ.get("PATCH_SIZE", 384))
     min_pos_pixels = max(1, round(BASE_MIN_POS * (patch_size / BASE_PATCH) ** 2))
 
     # ---- pos_weight annealing (None/None = old constant behaviour) ----
@@ -101,7 +75,7 @@ def main():
     isolation_gamma = float(os.environ.get("ISOLATION_GAMMA", 0.0))
     isolation_kernel = int(os.environ.get("ISOLATION_KERNEL", 9))
 
-    print(f"[info] FAST PROTOTYPE dual run: slow {SLOW_CHANNELS} {slow_days}d/{SLOW_BIN}d-bins, "
+    print(f"[info] SMOLDER training: slow {SLOW_CHANNELS} {slow_days}d/{SLOW_BIN}d-bins, "
           f"fast {FAST_CHANNELS} {fast_days}d | pos_weight={pos_weight} "
           f"samples_per_epoch={samples_per_epoch} max_epochs={max_epochs} "
           f"patch_size={patch_size} min_pos_pixels={min_pos_pixels} "
@@ -112,9 +86,13 @@ def main():
     # Pre-binned slow cube (build_slow_cube.py). Without it the datamodule falls
     # back to aggregating 144 raw days per sample: correct, but 22x slower
     # (2.30s vs 0.103s/sample) because it pulls 1079MB to keep 14MB.
-    slow_cube = str(SCRIPT_DIR / "cube_slow_8day.zarr")
-    if not Path(slow_cube).exists():
-        raise FileNotFoundError(f"{slow_cube} missing — run build_slow_cube.py first")
+    slow_cube = "cube_slow_8day.zarr"
+    if not resolve(slow_cube).exists():
+        raise FileNotFoundError(f"{slow_cube} not found in cwd or $SMOLDER_DATA "
+                                "(build it with python -m smolder.data.build_slow_cube)")
+    for p in train_paths + val_paths:
+        if not resolve(p).exists():
+            raise FileNotFoundError(f"{p} not found in cwd or $SMOLDER_DATA")
 
     dm = DualDataModule(
         train_paths=train_paths,
@@ -193,7 +171,7 @@ def main():
         focal_gamma=1.0,
         topk_fracs=(0.15, 0.05, 0.01),
         aux_loss_weight=0.3,
-        cosine_t_max=max_epochs,
+        cosine_t_max=int(os.environ.get("COSINE_T_MAX", max_epochs)),
         fuse=os.environ.get("FUSE", "cross_attn"),   # FireSenseNet-style fusion
         attn_heads=int(os.environ.get("ATTN_HEADS", 4)),
         soft_pos=float(os.environ.get("SOFT_POS", 0.9)),
@@ -212,8 +190,8 @@ def main():
     )
 
     jobid = os.environ.get("SLURM_JOB_ID", "local")
-    run_tag = os.environ.get("RUN_TAG", "dual_fastproto")
-    run_dir = Path("/home/saturn/gwgi/gwgi107h/wildfire_data/checkpoints") / run_tag / f"job_{jobid}"
+    run_tag = os.environ.get("RUN_TAG", "smolder")
+    run_dir = Path(os.environ.get("SMOLDER_RUNS", "runs")) / run_tag / f"job_{jobid}"
     run_dir.mkdir(parents=True, exist_ok=True)
 
     csv_logger = CSVLogger(save_dir=str(run_dir), name="lightning_logs")
@@ -258,8 +236,8 @@ def main():
         print(f"[info] resuming from checkpoint: {resume_ckpt}")
     trainer.fit(model, dm, ckpt_path=resume_ckpt)
 
-    trainer.save_checkpoint(f"checkpoints/last_dual_fastproto_{jobid}.ckpt")
-    print(f"[done] wrote checkpoints/last_dual_fastproto_{jobid}.ckpt")
+    trainer.save_checkpoint(str(run_dir / "final.ckpt"))
+    print(f"[done] wrote {run_dir / 'final.ckpt'}")
 
 
 if __name__ == "__main__":

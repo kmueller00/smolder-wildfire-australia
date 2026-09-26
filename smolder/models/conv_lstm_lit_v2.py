@@ -14,7 +14,7 @@ from typing import Any, Dict, Optional
 
 import torch
 import torch.optim as optim
-from conv_lstm_lit import ConvLSTMLit
+from smolder.models.conv_lstm_lit import ConvLSTMLit
 
 logger = logging.getLogger(__name__)
 

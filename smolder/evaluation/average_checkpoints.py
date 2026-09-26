@@ -1,24 +1,12 @@
-"""Weight-average several checkpoints from the SAME run (poor-man's SWA).
+"""Weight-average checkpoints from one training run (stochastic weight averaging).
 
-Motivation: this project's val_ap is noisy epoch-to-epoch (the combo run sat at
-0.497-0.505 across ep15-ep19 with no clear winner), and val_ap on 2019 has
-repeatedly failed to predict 2020 test performance -- `trimmed` won on val_ap
-by 4% and LOST on real test. Averaging the weights of several near-equal
-late-training checkpoints is the cheapest known variance reducer: no retraining,
-one forward pass to evaluate, and it typically lands at or above the best
-individual member.
-
-Safe here because the architecture has NO normalization layers carrying running
-statistics (only nn.LayerNorm, which is purely functional over the feature dim)
--- so no BatchNorm re-estimation pass is needed after averaging. Verified by
-grep over seasfire/backbones/conv_lstm.py before writing this.
-
-Only average checkpoints from ONE run with identical architecture/hparams;
-averaging across runs (different random inits) does not work -- the weights are
-not in the same loss basin.
+The released model is the average of the three best stage-2 checkpoints by
+validation AP (epochs 28, 29, 30). Averaging is only meaningful for
+checkpoints of the same run; the architecture has no running-statistics
+normalisation (LayerNorm only), so no re-estimation pass is needed.
 
 Usage:
-    CKPTS="a.ckpt:b.ckpt:c.ckpt" OUT=avg.ckpt python average_checkpoints.py
+    CKPTS="a.ckpt:b.ckpt:c.ckpt" OUT=smolder_swa.ckpt python -m smolder.evaluation.average_checkpoints
 """
 import os
 import sys
@@ -26,11 +14,9 @@ from collections import OrderedDict
 
 import torch
 
-CKPTS = [p for p in os.environ["CKPTS"].split(":") if p.strip()]
-OUT = os.environ.get("OUT", "checkpoints/averaged.ckpt")
-
-
 def main():
+    CKPTS = [p for p in os.environ.get("CKPTS", "").split(":") if p.strip()]
+    OUT = os.environ.get("OUT", "averaged.ckpt")
     if len(CKPTS) < 2:
         sys.exit(f"[error] need >=2 checkpoints to average, got {len(CKPTS)}")
 
@@ -75,11 +61,9 @@ def main():
         else:
             out_sd[k] = v
 
-    # Keep the full Lightning structure so load_from_checkpoint() works
-    # unchanged downstream (fit_recalibration.py / operational_stats_dual.py
-    # both go through ConvLSTMLitDual.load_from_checkpoint).
+    # Keep the full Lightning structure so load_from_checkpoint() works unchanged.
     base["state_dict"] = out_sd
-    base["averaged_from"] = CKPTS
+    base["averaged_from"] = [os.path.basename(c) for c in CKPTS]
     # An averaged model does not correspond to any single epoch; leaving the
     # original epoch/global_step would be misleading if anything resumed from it.
     base["epoch"] = -1

@@ -1,65 +1,36 @@
-"""Is ">3px from t-3 fire" actually a good definition of a NEW fire?
+"""How much does "new-fire lift" depend on how "new" is defined?
 
-The whole "new-fire lift" metric this project optimizes rests on one hardcoded
-pair of choices in `operational_stats_dual.py`:
+A fire pixel is counted as new if no fire was detected within radius r (px,
+exact euclidean distance) of it in the history window: the union of the last W
+y_fire_3d slices that end on the forecast issue day (W slices cover W+2 days of
+detections), land-masked. The script sweeps r in RADII and W in WINDOWS and
+reports, for each cell, the share of fire pixels that still qualify and the
+model's lift at several top-k fractions.
 
-    recent = fire_hist_t-3                       # temporal window: t-3 ONLY
-    known  = binary_dilation(recent, iters=3)    # spatial radius: ~3 px
-    new    = truth & ~known
-
-Neither number was ever calibrated against anything. Two independent reasons to
-doubt them:
-
-1. SPATIAL. 1 px = 1 km, so the cutoff says "3 km from where fire was 3 days
-   ago". Australian grassfires run at 5-25 km/h and forest fires 1-4 km/h, so a
-   3-day-old front can legitimately be 10-100+ km away. Anything in the 3-30 km
-   band is therefore very likely the SAME fire's spreading front, not a new
-   ignition -- i.e. the current "new fire" set is contaminated with spread.
-
-2. TEMPORAL. `known` is built from t-3 alone. VIIRS detection is intermittent
-   (cloud, overpass timing, sub-pixel intensity), so a fire detected at t-10,
-   missed at t-3, and re-detected at t counts as brand "new" under the current
-   rule. That is detection noise being scored as new-ignition skill.
-
-Both push the same way: the metric likely OVERSTATES how much genuine
-new-ignition signal exists. Circumstantial support -- 39% of fire pixels in the
-2020 test patches qualify as "new" under the current rule, which is implausibly
-high for true fresh ignitions over a 3-day horizon.
-
-This script sweeps BOTH axes and reports, for each (radius, window) cell, how
-many pixels still qualify and what the lift is. Falling counts with rising
-radius/window tell you how much of the headline number was spread and
-re-detection rather than new ignition.
-
-Uses exact euclidean distance (distance_transform_edt) rather than iterated
-binary_dilation -- the latter's default cross-shaped structure gives a TAXICAB
-diamond, not a disk, so "iterations=3" is not a 3px euclidean radius.
-
-Landmask is applied to every history read: `y_fire_3d` labels ocean as fire=1
-(documented pitfall), and skipping it would collapse every coastal pixel's
-"nearest recent fire" onto the sea.
+Uses the same patch protocol as evaluate.py (seed, fire-density threshold,
+land fraction). Note that evaluate.py's headline "new fire" uses a different,
+narrower reference -- one history slice and a 3-iteration cross-shaped
+dilation (taxicab radius 3) -- so its headline new-fire lift is not exactly a
+cell of this grid (nearest cell: r=3 px, W=1).
 
 Usage:
-    CKPT=... PATCH=384 N_PATCH=600 EVAL_YEAR=2020 python newfire_definition_sweep.py
+    SMOLDER_DATA=/path/to/cubes python -m smolder.evaluation.newfire_definition_sweep
 """
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import numpy as np
 import torch
 import zarr
 from scipy import ndimage
 
-from conv_lstm_lit_dual import ConvLSTMLitDual
-from zarr_dual_datamodule import DualPatchConfig, DualWindowDataset
+from smolder.models.conv_lstm_lit_dual import ConvLSTMLitDual
+from smolder.data.io import daily_cube, open_zarr_root
+from smolder.data.zarr_dual_datamodule import DualPatchConfig, DualWindowDataset
 
-# CKPTS (colon-separated) evaluates each model AND their prob-mean over the same
-# patches. Needed to test the no-fire-history specialist honestly: its pooled
-# val_ap is meaningless (dominated by near-field pixels it cannot see by
-# construction), so the only fair question is whether it adds skill in the
-# far-field r>=10px regime where the main model scores 0.1x -- below random.
-CKPTS = [p for p in os.environ.get("CKPTS", os.environ.get("CKPT", "")).split(":") if p.strip()]
+# CKPTS may list several checkpoints (colon-separated); each is scored on the
+# same patches. Default: the released model.
+CKPTS = [p for p in os.environ.get("CKPTS", os.environ.get("CKPT", "checkpoints/smolder_swa.ckpt")).split(":") if p.strip()]
 CKPT = CKPTS[0]
 PATCH = int(os.environ.get("PATCH", 384))
 N_PATCH = int(os.environ.get("N_PATCH", 600))
@@ -69,10 +40,10 @@ _BASE_PATCH, _BASE_MIN_POS = 256, 20
 MIN_POS = max(1, round(_BASE_MIN_POS * (PATCH / _BASE_PATCH) ** 2))
 OFFS = {"2015": 0, "2016": 365, "2017": 731, "2018": 1096, "2019": 1461, "2020": 1826}
 
-# px (= km). 3 is the current setting; 0 means "same pixel only".
+# px (= km). 3 matches evaluate.py; 0 means "same pixel only".
 RADII = [0, 1, 3, 5, 10, 20, 40]
-# days of history ending at t_end-3. 3 == current setting (the t-3 slice alone).
-WINDOWS = [3, 7, 14, 30, 90]
+# number of y_fire_3d history slices ending on the issue day; 1 matches evaluate.py.
+WINDOWS = [1, 3, 7, 14, 30, 90]
 TOPK = [0.001, 0.002, 0.005, 0.01, 0.02]
 REPORT_K = 0.005     # headline operating point (where new-fire lift peaks)
 
@@ -94,7 +65,7 @@ def lift_at(prob, truth, land, f):
 def main():
     torch.set_num_threads(8)
     dev = "cuda" if torch.cuda.is_available() else "cpu"
-    g = zarr.open_group(f"cube_daily_smgrid_{EVAL_YEAR}.zarr", mode="r")
+    g = open_zarr_root(daily_cube(EVAL_YEAR))
     yarr = g[Y_KEY]
     T_max = yarr.shape[0]
 
@@ -118,7 +89,7 @@ def main():
     def mk_ds(fh):
         """fh=False builds the specialist's fire-history-free input."""
         return DualWindowDataset(DualPatchConfig(
-            zarr_paths=(f"cube_daily_smgrid_{EVAL_YEAR}.zarr",),
+            zarr_paths=(daily_cube(EVAL_YEAR),),
             stats_path="channel_stats_2015_2018.json",
             slow_cube_path="cube_slow_8day.zarr", day_offset=OFFS[EVAL_YEAR],
             patch_size=PATCH, samples_per_epoch=N_PATCH * 3, seed=21,
@@ -164,8 +135,10 @@ def main():
         if len(models) > 1:
             probs["prob-mean"] = np.mean([probs[names[mi]] for mi in range(len(models))], axis=0)
 
-        # history windows all END at t_end-3, the established leakage cutoff
-        t_hi = t_end - 3
+        # The last-step target is y_fire_3d[t_end-1] (fire on days t_end..t_end+2).
+        # History slices end at y_fire_3d[t_end-4] (fire up to day t_end-1, the
+        # issue day). A window of W slices covers the W+2 days up to that day.
+        t_hi = t_end - 1 - 3
         hist_cache = {}
         for w in WINDOWS:
             t_lo = max(0, t_hi - w + 1)
@@ -203,16 +176,16 @@ def main():
           f"({tot_fire/kept:.0f}/patch) ***")
 
     print("\n=== share of fire pixels still counted as NEW (%) ===")
-    print("            " + "".join(f"{w:>8}d" for w in WINDOWS))
+    print("            " + "".join(f"{'W='+str(w):>9}" for w in WINDOWS))
     for r in RADII:
         cells = "".join(f"{100.0*n_new[(r,w)]/max(tot_fire,1):8.1f} " for w in WINDOWS)
-        tag = "  <-- current" if r == 3 else ""
+        tag = "  <-- headline radius" if r == 3 else ""
         print(f"  r={r:<3}px  {cells}{tag}")
-    print("            " + "".join(f"{'^current' if w==3 else '':>9}" for w in WINDOWS))
+    print("            " + "".join(f"{'^headline' if w==1 else '':>9}" for w in WINDOWS))
 
     for nm in names:
         print(f"\n=== NEW-fire lift @ top-{100*REPORT_K:g}%  --  {nm} ===")
-        print("            " + "".join(f"{w:>8}d" for w in WINDOWS))
+        print("            " + "".join(f"{'W='+str(w):>9}" for w in WINDOWS))
         for r in RADII:
             cells = ""
             for w in WINDOWS:
@@ -224,21 +197,31 @@ def main():
         print(f"\n=== FAR-FIELD verdict (r>=10px = genuinely new ignition) ===")
         print(f"  {'model':<34} " + "".join(f"r={r}px".rjust(9) for r in (10, 20, 40)))
         for nm in names:
-            cells = "".join(f"{np.nanmean(lifts[nm][(r,3)][REPORT_K]):9.2f}" for r in (10, 20, 40))
+            cells = "".join(f"{np.nanmean(lifts[nm][(r,1)][REPORT_K]):9.2f}" for r in (10, 20, 40))
             print(f"  {nm:<34} {cells}")
         print("  (lift <1.0 = WORSE than random; the main model scores ~0.1x here)")
 
     print(f"\n=== mean NEW-fire px per patch ===")
-    print("            " + "".join(f"{w:>8}d" for w in WINDOWS))
+    print("            " + "".join(f"{'W='+str(w):>9}" for w in WINDOWS))
     for r in RADII:
         print(f"  r={r:<3}px  " + "".join(f"{n_new[(r,w)]/max(kept,1):8.1f} " for w in WINDOWS))
 
-    cur = 100.0 * n_new[(3, 3)] / max(tot_fire, 1)
+    import json
+    out = dict(eval_year=int(EVAL_YEAR), n_patches=kept, fire_px=tot_fire, report_k=REPORT_K,
+               radii_px=RADII, windows=WINDOWS,
+               share_new_pct={str(w): [100.0 * n_new[(r, w)] / max(tot_fire, 1) for r in RADII] for w in WINDOWS},
+               lift={nm: {str(w): [float(np.nanmean(lifts[nm][(r, w)][REPORT_K])) if lifts[nm][(r, w)][REPORT_K] else None
+                                   for r in RADII] for w in WINDOWS} for nm in names})
+    with open(f"newfire_sweep_{EVAL_YEAR}.json", "w") as fh:
+        json.dump(out, fh, indent=1)
+    print(f"wrote newfire_sweep_{EVAL_YEAR}.json")
+
+    cur = 100.0 * n_new[(3, 1)] / max(tot_fire, 1)
     strict = 100.0 * n_new[(20, 30)] / max(tot_fire, 1)
-    print(f"\n  current rule (r=3px, 3d window) counts {cur:.1f}% of fire px as NEW")
-    print(f"  strict rule  (r=20px, 30d window) counts {strict:.1f}%")
+    print(f"\n  headline rule (r=3px, W=1) counts {cur:.1f}% of fire px as NEW")
+    print(f"  strict rule   (r=20px, W=30) counts {strict:.1f}%")
     if cur > 0:
-        print(f"  => {100.0*(1-strict/cur):.0f}% of what the current metric calls 'new fire' is "
+        print(f"  => {100.0*(1-strict/cur):.0f}% of what the headline rule calls 'new fire' is "
               f"within 20km of, or a re-detection of, fire from the past 30 days")
 
 

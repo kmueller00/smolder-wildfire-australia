@@ -1,178 +1,232 @@
 # SMOLDER
 
 **S**low-**M**emory **O**perator with **L**atent **D**ual-attention for
-**E**stimating fire **R**isk — per-pixel **next-3-day wildfire risk** for
-continental Australia at ~1 km resolution.
+**E**stimating fire **R**isk: a per-pixel forecast of wildfire occurrence over
+the next three days for continental Australia at 0.01° (~1 km) resolution.
 
-The name is literal: a smoulder is a slow burn, and *slow memory* is what
-separates this model from short-window fire-weather baselines. SMOLDER tracks
-fuel state over **144 days**, because the two things that cause a fire evolve
-at very different speeds — **fuel** dries out over months, while **fire
-weather** turns over in hours. A ConvLSTM encodes each stream at its own
-rate, and cross-attention lets today's weather ask which part of the
-long-term fuel signal matters where.
+Fire needs fuel that is dry enough and weather that lets it ignite and spread.
+The two change on different time scales: fuel state over months, fire weather
+over days. SMOLDER therefore reads two input streams, 144 days of vegetation,
+soil moisture and rainfall and 14 days of fire weather and recent fire. Each
+stream has its own ConvLSTM encoder, and the two are fused by per-pixel
+cross-attention.
 
 ![architecture](figures/fig_smolder_architecture.png)
 
-## Inputs, at 1 km resolution
+## Task
 
-Every channel the released checkpoint actually reads, confirmed against the
-training run's own startup log — no more, no less.
+For an issue day *D* and every land pixel, SMOLDER outputs a risk score for
+**at least one VIIRS active-fire detection on day D+1, D+2 or D+3**. Inputs
+contain no information later than *D*. The output is a ranking score, not a
+calibrated probability (see *Limitations*).
 
-![input factors](figures/fig_inputs.png)
+- Grid: 3474 × 4110 px, EPSG:4326, 0.01° pixels, origin 112.905° E / 9.005° S
+- Split by year: train 2015–2018, validation 2019 (checkpoint selection),
+  test 2020 (used only for the numbers below)
 
-## Training convergence
+## Inputs
 
-One continuous run (resumed once after a scheduler wall-clock limit). The
-released weights are a weight average (SWA) of three late, near-equal
-checkpoints — the single most reliable free improvement found in developing
-this model, applied here as the final step.
+![input channels](figures/fig_inputs.png)
+
+| Variable | Source | Native resolution | Used as |
+|---|---|---|---|
+| Soil moisture index | CSIRO SMIPS (Soil Moisture Integration and Prediction System); also defines the model grid | 0.01°, daily | slow branch |
+| Precipitation | ANUClimate 2.0 daily rainfall (ANU / NCI) | 0.01°, daily | slow branch (8-day sums) |
+| Leaf area index | HiQ-LAI, reprocessed MODIS LAI (Yan et al., 2024) | 8-day | slow branch |
+| Vapour pressure deficit | ERA5 (Hersbach et al., 2020), at daily maximum temperature | 0.25°, daily | fast branch |
+| Land-surface temperature | Gap-filled daily MODIS LST (Zhang et al., 2022) | 1 km, daily | fast branch |
+| 10 m wind speed | BARRA2, Bureau of Meteorology regional reanalysis | ~12 km, daily | fast branch |
+| Active fire (inputs and target) | VIIRS 375 m active fire (VNP14IMG, NASA FIRMS; Schroeder et al., 2014); vegetation fires, nominal and high confidence | 375 m, daily | fire history, target |
+| Above-ground biomass | ESA Climate Change Initiative Biomass | 100 m | static |
+| Land cover | Copernicus Global Land Service LC100 v3.0.1 (Buchhorn et al., 2020) | 100 m | embedding |
+| Climate zone | Köppen–Geiger 1991–2020 (Beck et al., 2023) | 1 km | embedding |
+
+All fields are resampled to the SMIPS grid. Gaps in the 8-day LAI are filled
+by carrying the last observation forward. The original cubes also hold NDVI
+(MODIS MOD09A1), which the model does not read.
+
+## Training
+
+| Setting | Value |
+|---|---|
+| Encoders | ConvLSTM, 1 layer, 64 hidden channels, 5 × 5 kernels |
+| Fusion | multi-head cross-attention (4 heads); the fast state queries the slow state per pixel |
+| Parameters | 1.09 M |
+| Patches | 384 × 384 px, 2000 per epoch; half of the draws must contain ≥ 45 fire pixels |
+| Batch | 2, gradient accumulation 4 |
+| Optimiser | AdamW, lr 3·10⁻⁴, weight decay 0.01, cosine schedule with a 25-epoch period, up to 40 epochs, early stopping on validation AP (patience 6) |
+| Loss | BCE on soft labels (fire 0.9, background 0.02), plus 0.3 · Dice for epochs 0–2; positive weight annealed 100 → 20 over 8 epochs; isolated fire pixels up-weighted (γ = 2); auxiliary loss on every fast time step (weight 0.3) |
+| Sampling | 30 % of patches must contain fire absent from the fire history; fire-history channels zeroed for 30 % of samples |
+| Released weights | average of the three best checkpoints by validation AP |
+
+The exact configuration is in [configs/smolder.env](configs/smolder.env).
 
 ![training convergence](figures/fig_convergence.png)
 
----
+## Results, 2020 hold-out year
 
-## Results
-
-The numbers below are on the **2020 hold-out test year**, never used for
-training or model selection (2015–2018 train, 2019 validation). Pooled over
-1500 patches / 188.6 M land pixels, base fire rate **0.175 %**.
-
-| Metric | Value |
-|---|---|
-| AUC-PR | **0.4485** |
-| ROC-AUC | 0.8983 |
-| Fire captured, flagging top 0.5 % of the map | 51.5 % (103× enrichment) |
-| New-fire lift, same budget | 14.5× |
+> **Pending.** The model is being retrained after the correction described
+> below. AUC-PR, ROC-AUC, lift tables and the figures in this section will be
+> added when training and evaluation have finished.
 
 ![lift curve](figures/fig_lift_curve.png)
 
-### Operating characteristics
+**Evaluation protocol.** 1500 patches of 384 × 384 px are drawn with a
+fixed seed from fire-active scenes (≥ 45 fire pixels and ≥ 50 % land per
+patch). The results therefore measure how well SMOLDER ranks pixels *where
+fire occurs*, not the continent-wide false-alarm rate. AUC-PR and ROC-AUC are
+pooled over all land pixels of all patches. TPR and lift are computed per patch
+(top-k of that patch's land pixels) and averaged. *New fire* is target fire
+more than 3 px (taxicab distance) from any fire in the newest fire-history
+window, i.e. fire detected on days D−2 to D. Reproduce with
+`python -m smolder.evaluation.evaluate`.
 
-| Top-k | TPR (all fire) | Lift (all fire) | TPR (new fire) | Lift (new fire) |
-|---|---|---|---|---|
-| 0.01 % | 0.101 | 1006× | 0.000 | 0.7× |
-| 0.1 % | 0.352 | 353× | 0.008 | 7.9× |
-| 0.5 % | 0.515 | 103× | 0.073 | **14.5×** |
-| 1 % | 0.567 | 57× | 0.127 | 12.7× |
-| 5 % | 0.660 | 13× | 0.292 | 5.8× |
+## Observed fire and predicted risk
 
-All-fire enrichment peaks at the tightest threshold; new-fire enrichment
-peaks mid-range at top 0.5 %.
+Four 2020 forecasts. Left: fire detected in the three days after the issue
+date. Right: SMOLDER's risk map issued on that date, as a within-patch
+percentile, with the top-1 % area outlined.
 
-## Predictions vs reality
+![observed vs predicted](figures/fig_gt_vs_pred_2020.png)
 
-Four dates from the 2020 hold-out year — left, what actually burned; right,
-what SMOLDER predicted three days earlier. The black outline is the model's
-top-1 % highest-risk area.
+## What "new-fire lift" measures
 
-![ground truth vs predicted](figures/fig_gt_vs_pred_2020.png)
+Whether a fire pixel counts as "new" depends on a distance threshold and on
+how much fire history is considered, and the resulting lift depends on both.
 
-Performance varies with the situation: tightly clustered fire fronts are
-caught almost completely (99 %, 88 %), while days with many small scattered
-ignitions are much harder (39 %). Both cases are shown deliberately rather
-than only the favourable ones.
+![new-fire distance dependence](figures/fig_newfire_distance_decay.png)
 
----
+Results for the retrained model will be added here.
 
-## What "new-fire lift" does and does not mean
+## Limitations
 
-The wildfire-ML literature commonly reports a "new-fire" enrichment computed
-by excluding fire pixels within *r* pixels of recent fire. We measured how
-much that number depends on *r*, and the answer is: almost entirely — so we
-report the full curve, not a single figure.
+- **Skill depends on fire that is already burning.** During development,
+  skill was concentrated near recent fire: spread, flare-ups and
+  re-detection. The previous model ranked isolated new ignitions (more than
+  10 km from recent fire) no better than random; this will be re-measured
+  for the retrained model. The immediate cause of
+  an isolated ignition (a lightning strike, a spark) is a point event with no
+  precursor in any 1 km daily field, so part of this limit is probably
+  irreducible at this resolution.
+- **Additional 1 km predictors did not help.** During development, lightning
+  climatology, terrain (elevation, slope, aspect), fuel age, downwind
+  alignment, road distance, population, a McArthur forest fire danger index
+  from SILO reanalysis, and Sentinel-2 live fuel moisture aggregated to 1 km
+  were each tested. None improved hold-out skill beyond evaluation noise, so
+  none is used. These tests were run before the fire-history correction
+  described below, while the model still had access to first-day detections.
+  They should be repeated before the plateau is taken as settled. Likely
+  reasons for a genuine plateau: sub-kilometre fuel continuity and ignition
+  sources are averaged away at 1 km, and weather at 12–25 km resolution
+  varies little between neighbouring pixels.
+- **Labels are satellite detections.** VIIRS misses fires under cloud or
+  canopy, small or short-lived fires, and fires between overpasses. Missed
+  detections enter as negatives, both as targets and in the fire history.
+- **One test year.** 2020 includes the end of the 2019–20 Black Summer fire
+  season. Performance in other years has not been measured.
+- **Scores are not probabilities.** The positive-class weighting compresses
+  the raw output. `smolder.evaluation.fit_recalibration` fits an isotonic map
+  on the 2019 validation year. This changes the probability values but not
+  the ranking.
 
-![distance decay](figures/fig_newfire_distance_decay.png)
+## Correction to earlier versions
 
-At the conventional **r = 3 px (≈ 3 km)** threshold, 35.7 % of fire pixels
-qualify as "new" and the model shows real skill (14.5× lift). Widening the
-radius to 20 px — the honest boundary between *nearby spread* and *genuinely
-isolated ignition* — drops that share to 3.9 % of pixels, and the model's own
-enrichment there falls to ≈1× (random). **The 14.5× headline is real
-near-field spread skill; this model has essentially no demonstrated skill at
-predicting an isolated ignition with no fire anywhere nearby.**
-
-No principled single *r* exists — Australian fire spread rates range from
-~1 km/h in closed forest to ~25 km/h in grassland, so no fixed distance
-cleanly separates "spread" from "new ignition" everywhere. That ambiguity is
-the reason to publish the curve rather than a point estimate.
-
----
-
-## Architecture
-
-`ConvLSTMSegDual` — two independent ConvLSTM encoders fused by per-pixel
-cross-attention (query = fast branch, key/value = slow branch). 1.16 M
-parameters, 384 × 384 px training patches. Predictor lag structure was
-selected empirically beforehand: LAI's skill peaks at a ~130-day lag
-(AUC 0.779), soil moisture and precipitation at ~150 days — which is why the
-slow branch carries 144 days of history.
-
-## Repository layout
-
-```
-smolder/
-  models/        ConvLSTM backbone + Lightning modules
-  data/          datamodule, cube builders, channel statistics
-  training/      training entry point + SLURM script
-  evaluation/    test-set metrics, calibration, diagnostics
-checkpoints/     final model weights (SWA, 4.2 MB)
-figures/         every figure in this README + the script that generates it
-docs/            full development log
-```
-
-## Quick start
-
-```bash
-pip install -r requirements.txt
-
-# Evaluate SMOLDER on the 2020 test year
-CKPT=checkpoints/firecastnet_best_swa.ckpt PATCH=384 EVAL_YEAR=2020 N_PATCH=1500 \
-  python smolder/evaluation/operational_stats_dual.py
-
-# Reproduce the new-fire distance-decay analysis
-CKPT=checkpoints/firecastnet_best_swa.ckpt PATCH=384 N_PATCH=600 \
-  python smolder/evaluation/newfire_definition_sweep.py
-
-# Regenerate every figure in this README
-cd figures && python make_smolder_architecture.py && python make_inputs_figure.py \
-  && python make_convergence_figure.py && python make_lift_figure.py \
-  && python make_newfire_decay_figure.py
-```
-
-Data cubes are published separately on Zenodo (see *Data*).
-
----
+Versions of this repository before v1.0 reported a 2020 AUC-PR of 0.4485 and
+a new-fire lift of 14.5×. These results are withdrawn. In that model the
+most recent fire-history input covered detections up to and including the
+first day of the target window, a one-day overlap between input and label:
+30 % of target fire pixels were visible in the input only through this
+overlap. The released model is retrained with fire history that ends on the
+issue day for every time step. Results for the corrected model will be
+added to this README when its training has finished.
 
 ## Data
 
-Data cubes are archived on Zenodo: **[DOI to be inserted]**
+| Zenodo DOI | Content | Size |
+|---|---|---|
+| [10.5281/zenodo.22115979](https://doi.org/10.5281/zenodo.22115979) | `cube_2020_zenodo.tar` → `cube_2020_zenodo.zarr`: daily cube for the 2020 test year | 35 GB |
+| [10.5281/zenodo.21749290](https://doi.org/10.5281/zenodo.21749290) | `cube_slow_8day.tar` → `cube_slow_8day.zarr`: LAI, soil moisture and precipitation in 8-day bins, 2015–2020; `aux_rasters.tar`: static rasters not used by the released model | 16 GB + 2.8 GB |
 
-Daily cubes are `zarr` stores on the SMIPS ~1 km grid (3474 × 4110,
-EPSG:4326, 0.01° pixels, origin 112.905° E / −9.005° S), with `y_fire_3d`
-targets derived from VIIRS active-fire detections.
+Download both records and extract the archives into one directory, for
+example `tar -xf cube_2020_zenodo.tar && tar -xf cube_slow_8day.tar`; set
+`SMOLDER_DATA` to that directory. The two records are sufficient to reproduce
+every result in this README. The
+2015–2019 daily cubes (~250 GB) are not archived because they exceed the
+record size limit.
 
-Full 2015–2020 daily cubes total ~300 GB and exceed Zenodo record limits; the
-archive contains the **2020 test year** plus the pre-binned slow cube,
-sufficient to reproduce every result reported here. Remaining years can be
-rebuilt with `smolder/data/build_*.py` from the public BARRA2, MODIS, VIIRS
-and SMIPS sources.
+**Daily cube** (`zarr` v2, one store per year):
 
-**Known data caveat:** `y_fire_3d` labels ocean pixels as fire = 1. Always
-apply the land mask before any distance transform or metric computation.
+| Array | Shape | Content |
+|---|---|---|
+| `X` | (days, 3474, 4110, 6) | channels listed in the attribute `channels`: soil moisture, wind, VPD, precipitation, LST, LAI (native units; missing = 0) |
+| `y_fire_3d` | (days, 3474, 4110) | 1 if VIIRS detected fire at the pixel on day t+1, t+2 or t+3 |
+| `y_fire_3d_valid` | (days,) | per-day validity flag of `y_fire_3d` |
+| `landmask` | (3474, 4110) | 1 = land |
+| `agb`, `landcover`, `koppen_geiger` | (3474, 4110) | static layers read by the model |
+| `elevation`, `slope`, `aspect_sin`, `aspect_cos`, `lightning` | (3474, 4110) | static layers not read by the released model |
+| other `y_fire_*` | | alternative targets, not used |
+
+Attribute `time` lists the ISO date of each day. **`y_fire_3d` is 1 over the
+ocean**; apply `landmask` before any metric or distance computation.
+
+## Installation and use
+
+```bash
+git clone https://github.com/kmueller00/smolder-wildfire-australia
+cd smolder-wildfire-australia
+pip install -e .
+
+export SMOLDER_DATA=/path/to/zarr/stores   # holds cube_2020_zenodo.zarr and cube_slow_8day.zarr
+
+python -m smolder.evaluation.evaluate                   # headline metrics (needs checkpoints/smolder_swa.ckpt)
+python -m smolder.evaluation.newfire_definition_sweep   # distance dependence of new-fire lift
+
+# training (needs the 2015-2019 cubes)
+set -a; source configs/smolder.env; set +a
+python -m smolder.training.train
+```
+
+Figures are regenerated from `results/` without data or GPU:
+`cd figures && python make_<name>.py`.
+
+```
+smolder/
+  data/         data pipeline, slow-cube builder, channel statistics
+  models/       ConvLSTM backbone and Lightning modules
+  training/     training entry point
+  evaluation/   evaluation, distance sweep, checkpoint averaging, recalibration
+configs/        training configuration of the released model
+checkpoints/    released weights (smolder_swa.ckpt, added after retraining)
+results/        evaluation outputs behind every figure and table
+figures/        figures and the scripts that draw them
+```
+
+## References
+
+- Beck, H. E. et al. (2023). High-resolution (1 km) Köppen–Geiger maps for 1901–2099 based on constrained CMIP6 projections. *Scientific Data* 10, 724.
+- Buchhorn, M. et al. (2020). Copernicus Global Land Service: Land Cover 100 m, collection 3.
+- Hersbach, H. et al. (2020). The ERA5 global reanalysis. *Quarterly Journal of the Royal Meteorological Society* 146, 1999–2049.
+- Schroeder, W. et al. (2014). The New VIIRS 375 m active fire detection data product. *Remote Sensing of Environment* 143, 85–96.
+- Yan, K. et al. (2024). HiQ-LAI: a high-quality reprocessed MODIS leaf area index dataset with better spatiotemporal consistency from 2000 to 2022. *Earth System Science Data* 16.
+- Zhang, T., Zhou, Y., Zhu, Z., Li, X., Asrar, G. R. (2022). A global seamless 1 km resolution daily land surface temperature dataset (2003–2020). *Earth System Science Data* 14, 651–664.
+
+Each input dataset remains under its provider's licence.
 
 ## Citation
 
+Please cite the software (metadata in [CITATION.cff](CITATION.cff)) and the
+data records above.
+
 ```bibtex
-@software{smolder_australia,
-  title  = {SMOLDER: a Slow-Memory Operator with Latent Dual-attention for
-            Estimating wildfire Risk over Australia},
-  year   = {2026},
-  url    = {https://github.com/catKorb/smolder-wildfire-australia}
+@software{mueller_smolder_2026,
+  author  = {Müller, Korbinian},
+  title   = {SMOLDER: next-3-day wildfire risk for continental Australia at 1 km},
+  year    = {2026},
+  version = {1.0},
+  url     = {https://github.com/kmueller00/smolder-wildfire-australia}
 }
 ```
 
 ## License
 
-MIT (code). Data products follow the licences of their upstream sources
-(BARRA2, MODIS, VIIRS, SMIPS).
+MIT for the code (see LICENSE).

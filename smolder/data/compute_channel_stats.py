@@ -1,14 +1,15 @@
-"""Compute per-channel mean/std of the dynamic X channels (+ agb) over the
-training years by random patch sampling. Writes channel_stats_2015_2018.json.
-
-Run on a login node:  python compute_channel_stats.py
+"""Compute per-channel mean/std of the dynamic X channels (+ AGB) over the
+training years (2015-2018) by random patch sampling.
+Writes channel_stats_2015_2018.json.
 """
 import json
 import numpy as np
 from pathlib import Path
 import zarr
 
-SCRIPT_DIR = Path(__file__).resolve().parent
+from smolder.data.io import data_dir
+
+SCRIPT_DIR = data_dir()   # cubes are read from / written to $SMOLDER_DATA
 YEARS = [2015, 2016, 2017, 2018]
 PATCH = 256
 PATCHES_PER_YEAR = 100

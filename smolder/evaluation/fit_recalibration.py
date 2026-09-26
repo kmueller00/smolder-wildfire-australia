@@ -1,35 +1,30 @@
-"""Fit an isotonic-regression recalibration map for the dual_fh_attn checkpoint.
+"""Fit an isotonic map from SMOLDER's raw scores to calibrated probabilities.
 
-Why: pos_weight=100 in the training loss buys recall/ranking under extreme class
-imbalance at the cost of calibration -- raw sigmoid outputs sit in a compressed
-~0.65-0.75 band almost everywhere (measured on 2020 GeoTIFFs: land-wide mean 0.69,
-fire-pixel mean 0.70-0.80, i.e. barely distinguishable) even though the RANKING is
-real (fire-dense 128px blocks score 0.04-0.21 above local background). Isotonic
-regression is monotonic, so it preserves that ranking exactly while remapping the
-raw values to true calibrated probabilities fit on held-out 2019 data.
+The training loss up-weights fire pixels (pos_weight 100 -> 20), which helps
+ranking but compresses the raw sigmoid output, so raw scores are not
+probabilities. Isotonic regression fitted on the 2019 validation year maps
+them to observed fire frequencies. It is monotone, so it cannot change the
+ranking (it can only merge ties), and a map fitted for one checkpoint does not
+transfer to another.
 
-Fits on cube_daily_smgrid_2019.zarr (the val split, never used for model
-selection... except that val_ap WAS the selection metric, so this is calibration
-only, not a second free look at 2020 test).
-Saves recal_isotonic_dual_fh_attn.pkl (or OUT/CKPT-derived name) for
-make_australia_geotiff.py to apply. CKPT/PATCH/OUT are env-overridable so this
-can be refit for any checkpoint -- a calibration map fit on one checkpoint's
-raw output distribution does NOT transfer to another (e.g. constant vs
-annealed pos_weight compress the sigmoid output differently).
+Needs cube_daily_smgrid_2019.zarr, which is not part of the Zenodo archive
+(rebuild it with smolder/data, see README).
+
+Usage:
+    SMOLDER_DATA=/path/to/cubes python -m smolder.evaluation.fit_recalibration
 """
 import os, pickle, numpy as np, torch
 from sklearn.isotonic import IsotonicRegression
 from sklearn.metrics import average_precision_score
 
-from conv_lstm_lit_dual import ConvLSTMLitDual
-from zarr_dual_datamodule import DualWindowDataset, DualPatchConfig
+from smolder.models.conv_lstm_lit_dual import ConvLSTMLitDual
+from smolder.data.io import daily_cube
+from smolder.data.zarr_dual_datamodule import DualWindowDataset, DualPatchConfig
 
-CKPT = os.environ.get("CKPT",
-    "/home/saturn/gwgi/gwgi107h/wildfire_data/checkpoints/dual_fh_attn/job_1755283/"
-    "lightning_logs/version_0/checkpoints/best-epoch=7-val_ap=0.2790.ckpt")
-PATCH = int(os.environ.get("PATCH", 128))
+CKPT = os.environ.get("CKPT", "checkpoints/smolder_swa.ckpt")
+PATCH = int(os.environ.get("PATCH", 384))
 N_PATCHES = int(os.environ.get("N_PATCHES", 400))
-OUT = os.environ.get("OUT", "recal_isotonic_dual_fh_attn.pkl")
+OUT = os.environ.get("OUT", "recal_isotonic_smolder.pkl")
 
 
 def main():
@@ -39,7 +34,7 @@ def main():
     print(f"[info] loaded {os.path.basename(CKPT)} on {device}, patch_size={PATCH}", flush=True)
 
     ds = DualWindowDataset(DualPatchConfig(
-        zarr_paths=("cube_daily_smgrid_2019.zarr",), stats_path="channel_stats_2015_2018.json",
+        zarr_paths=(daily_cube(2019),), stats_path="channel_stats_2015_2018.json",
         slow_cube_path="cube_slow_8day.zarr", day_offset=1461,   # 2019 offset (2015-2018 = 1461 days)
         patch_size=PATCH, samples_per_epoch=N_PATCHES, seed=999, deterministic=True,
         min_pos_pixels=0, pos_frac=0.3, min_valid_frac=0.5,

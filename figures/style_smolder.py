@@ -11,7 +11,6 @@ Figures with no cartesian axes (the architecture diagram, the input-channel
 panel) do not use this module; the rule is specifically about chart panels.
 """
 import matplotlib.pyplot as plt
-from matplotlib.ticker import AutoMinorLocator
 
 PANEL_BG = "#E9E9EC"
 FIG_BG = "#FFFFFF"
@@ -34,6 +33,7 @@ def style_axes(ax, grid_x=True, grid_y=True):
     for side in ("left", "bottom"):
         ax.spines[side].set_color(SPINE_COLOR)
         ax.spines[side].set_linewidth(0.9)
+    ax.minorticks_off()          # every visible tick carries a gridline
     ax.tick_params(colors=INK, labelsize=9.5, length=3.5)
     if grid_x:
         ax.grid(axis="x", which="major", color=GRID_COLOR, linestyle="--",

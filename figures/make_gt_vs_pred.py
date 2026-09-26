@@ -1,44 +1,59 @@
-"""Ground truth vs SMOLDER prediction for four 2020 test-year dates.
+"""Observed fire vs SMOLDER's predicted risk for four 2020 hold-out patches.
 
-One row per date: what actually burned, next to what the model predicted the
-day before. Both panels share the same patch, extent and colour conventions so
-the comparison is honest and immediate.
+Two steps:
+  python make_gt_vs_pred.py --compute   needs the model + data (SMOLDER_DATA);
+                                        writes data/gt_vs_pred_2020.npz
+  python make_gt_vs_pred.py             plots from that cached file only
 
-Uses the released SWA checkpoint and the 2020 hold-out year -- never seen in
-training or model selection.
+Patch selection is deterministic (evaluation seed, fire-active patches, one per
+calendar month, the four with the most fire). Each row is one forecast: the
+right panel is the risk map issued on the stated date, the left panel the fire
+observed over the following three days (the model's target).
 """
-import os, sys
-sys.path.insert(0, "/home/saturn/gwgi/gwgi107h/wildfire_data/firecastnet")
-import numpy as np, torch, zarr
-import matplotlib; matplotlib.use("Agg")
+import os
+import sys
+
+import numpy as np
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from matplotlib.patches import Patch, Rectangle
 from matplotlib.colors import LinearSegmentedColormap
+from matplotlib.patches import Patch
+from matplotlib.ticker import FuncFormatter, MultipleLocator
 
-from conv_lstm_lit_dual import ConvLSTMLitDual
-from zarr_dual_datamodule import DualPatchConfig, DualWindowDataset
+from style_smolder import GRID_COLOR, INK, MUTED, PANEL_BG, SPINE_COLOR
 
-CKPT = os.environ.get("CKPT", "/home/saturn/gwgi/gwgi107h/wildfire_data/checkpoints/"
-    "dual_fh_attn_ps384_final_newfiresample_fhdropout_combo/job_1764897/swa_resume_ep28_29_30.ckpt")
+HERE = os.path.dirname(os.path.abspath(__file__))
+CACHE = os.path.join(HERE, "data", "gt_vs_pred_2020.npz")
+OUT = os.path.join(HERE, "fig_gt_vs_pred_2020.png")
+LON0, LAT0, PX = 112.904998779, -9.005000113999998, 0.01
 PATCH = 384
 N_EX = 4
-LON0, LAT0, PX = 112.904998779, -9.005000113999998, 0.01
-OUT = "figures/fig_gt_vs_pred_2020.png"
+MONTHS = ["January", "February", "March", "April", "May", "June", "July",
+          "August", "September", "October", "November", "December"]
 
-RISK = LinearSegmentedColormap.from_list("risk", ["#f7f7f5", "#ffe9a8", "#ffab3d", "#e8452c", "#8b0000"])
+OCEAN = "#C9D6E3"
+FIRE = "#A50F15"
+FIRE_OVER = "#0B3D91"
+RISK = LinearSegmentedColormap.from_list(
+    "risk", [PANEL_BG, "#FFE9A8", "#FFAB3D", "#E8452C", "#8B0000"])
 
 
-def main():
-    torch.set_num_threads(8)
-    g = zarr.open_group("cube_daily_smgrid_2020.zarr", mode="r")
-    lm_full = g["landmask"][:]
-    TIMES = list(g.attrs.get("time", []))
+def compute():
+    import torch
+    from scipy.stats import rankdata
+    sys.path.insert(0, os.path.dirname(HERE))
+    from smolder.data.io import daily_cube, open_zarr_root
+    from smolder.data.zarr_dual_datamodule import DualPatchConfig, DualWindowDataset
+    from smolder.models.conv_lstm_lit_dual import ConvLSTMLitDual
 
-    m = ConvLSTMLitDual.load_from_checkpoint(CKPT, map_location="cpu"); m.eval()
-    print("[info] loaded", os.path.basename(CKPT), flush=True)
-
+    ckpt = os.environ.get("CKPT", os.path.join(os.path.dirname(HERE), "checkpoints", "smolder_swa.ckpt"))
+    cube = daily_cube(2020)
+    times = list(open_zarr_root(cube).attrs.get("time", []))
+    m = ConvLSTMLitDual.load_from_checkpoint(ckpt, map_location="cpu")
+    m.eval()
     ds = DualWindowDataset(DualPatchConfig(
-        zarr_paths=("cube_daily_smgrid_2020.zarr",), stats_path="channel_stats_2015_2018.json",
+        zarr_paths=(cube,), stats_path="channel_stats_2015_2018.json",
         slow_cube_path="cube_slow_8day.zarr", day_offset=1826,
         patch_size=PATCH, samples_per_epoch=300, seed=21,
         min_pos_pixels=45, pos_frac=1.0, deterministic=True,
@@ -48,97 +63,125 @@ def main():
     for i in range(300):
         b = ds[i]
         land = b["mask"].numpy() > 0.5
-        y = (b["y"][-1].numpy() > 0) & land
-        n = int(y.sum())
-        tt = int(b["t_end"]); iso = TIMES[tt] if tt < len(TIMES) else str(tt)
-        # Dedup on the ISO month BEFORE reformatting, so the four panels stay
-        # spread across the year. Display form is "16 June 2020" so that no
-        # dash characters appear anywhere in the rendered figure.
-        _M = ["January","February","March","April","May","June","July",
-              "August","September","October","November","December"]
-        try:
-            date = f"{int(iso[8:10])} {_M[int(iso[5:7])-1]} {iso[:4]}"
-        except Exception:
-            date = iso
-        if n >= 250 and land.mean() > 0.65 and iso[:7] not in seen:
-            seen.add(iso[:7]); picks.append((n, date, b))
-        if len(picks) >= N_EX: break
-    picks.sort(key=lambda t: -t[0])
-    print("[info] dates:", [(p[1], p[0]) for p in picks], flush=True)
-
-    fig, axes = plt.subplots(len(picks), 2, figsize=(9.6, 4.55 * len(picks)))
-    if len(picks) == 1: axes = axes[None, :]
-
-    for r, (nfire, date, b) in enumerate(picks):
-        land = b["mask"].numpy() > 0.5
         truth = (b["y"][-1].numpy() > 0) & land
-        y0, x0 = int(b["y0"]), int(b["x0"])
-        ext = [LON0 + x0*PX, LON0 + (x0+PATCH)*PX, LAT0 - (y0+PATCH)*PX, LAT0 - y0*PX]
+        iso = times[int(b["t_end"])]
+        if truth.sum() >= 250 and land.mean() > 0.65 and iso[:7] not in seen:
+            seen.add(iso[:7])
+            picks.append((int(truth.sum()), iso, b, land, truth))
+        if len(picks) >= N_EX:
+            break
+    picks.sort(key=lambda t: -t[0])
 
+    out = {}
+    for r, (_, iso, b, land, truth) in enumerate(picks):
         with torch.no_grad():
             p = torch.sigmoid(m.forward_seq(b["x_slow"].unsqueeze(0), b["x_fast"].unsqueeze(0),
                                             b["x_cat"].unsqueeze(0))[:, -1])[0].numpy()
-        v = p[land]
-        thr = np.partition(v, -max(1, int(0.01*v.size)))[-max(1, int(0.01*v.size))]
-        top1 = land & (p >= thr)
+        pct = np.full(p.shape, np.nan, np.float32)
+        pct[land] = 100.0 * (rankdata(p[land], method="average") - 1) / max(land.sum() - 1, 1)
+        out[f"pct_{r}"] = pct.astype(np.float16)
+        out[f"prob_{r}"] = p.astype(np.float32)
+        out[f"land_{r}"] = land
+        out[f"truth_{r}"] = truth
+        out[f"yx_{r}"] = np.array([int(b["y0"]), int(b["x0"])])
+        out[f"date_{r}"] = np.array(iso)
+    os.makedirs(os.path.dirname(CACHE), exist_ok=True)
+    np.savez_compressed(CACHE, n=len(picks), **out)
+    print("wrote", CACHE, [str(out[f"date_{r}"]) for r in range(len(picks))])
+
+
+def _deg(axis):
+    if axis == "lon":
+        return FuncFormatter(lambda v, _: f"{v:.0f}°E")
+    return FuncFormatter(lambda v, _: f"{abs(v):.0f}°S")
+
+
+def _style_map(ax):
+    """House style on a map panel: grey panel, white dashed gridlines at every
+    (1 degree) tick. Gridlines sit above the raster so they stay visible."""
+    ax.set_facecolor(PANEL_BG)
+    ax.xaxis.set_major_locator(MultipleLocator(1.0))
+    ax.yaxis.set_major_locator(MultipleLocator(1.0))
+    ax.xaxis.set_major_formatter(_deg("lon"))
+    ax.yaxis.set_major_formatter(_deg("lat"))
+    ax.minorticks_off()
+    ax.set_axisbelow(False)
+    ax.grid(True, color=GRID_COLOR, linestyle="--", linewidth=0.8, alpha=0.9)
+    ax.tick_params(colors=INK, labelsize=8, length=3)
+    for side in ("top", "right"):
+        ax.spines[side].set_visible(False)
+    for side in ("left", "bottom"):
+        ax.spines[side].set_color(SPINE_COLOR)
+
+
+def plot():
+    d = np.load(CACHE)
+    n = int(d["n"])
+    fig, axes = plt.subplots(n, 2, figsize=(10.2, 4.75 * n + 1.3), facecolor="white")
+    for r in range(n):
+        pct = d[f"pct_{r}"].astype(np.float32)
+        prob = d[f"prob_{r}"]
+        land, truth = d[f"land_{r}"], d[f"truth_{r}"]
+        y0, x0 = d[f"yx_{r}"]
+        iso = str(d[f"date_{r}"])
+        date = f"{int(iso[8:10])} {MONTHS[int(iso[5:7]) - 1]} {iso[:4]}"
+        ext = [LON0 + x0 * PX, LON0 + (x0 + PATCH) * PX, LAT0 - (y0 + PATCH) * PX, LAT0 - y0 * PX]
+
+        v = prob[land]
+        k = max(1, int(0.01 * v.size))
+        top1 = land & (prob >= np.partition(v, -k)[-k])
         caught = int((truth & top1).sum())
+        nfire = int(truth.sum())
+        yy, xx = np.where(truth)
+        fx, fy = ext[0] + (xx + 0.5) * PX, ext[3] - (yy + 0.5) * PX
+        ocean = np.ma.masked_where(land, np.ones(land.shape))
+
+        ax = axes[r, 0]
+        ax.imshow(ocean, extent=ext, cmap=LinearSegmentedColormap.from_list("o", [OCEAN, OCEAN]),
+                  interpolation="nearest", zorder=0)
+        ax.scatter(fx, fy, s=2.2, c=FIRE, marker="s", linewidths=0, zorder=3)
+        ax.set_title(f"Observed fire, 3 days after {date}", fontsize=10.5,
+                     fontweight="bold", color=INK, pad=6)
+        ax.text(0.025, 0.04, f"{nfire} fire pixels", transform=ax.transAxes, fontsize=8.5,
+                fontweight="bold", color=INK, zorder=5,
+                bbox=dict(fc="white", ec=MUTED, lw=0.6, alpha=0.92, pad=2.2))
+
+        ax = axes[r, 1]
+        ax.imshow(ocean, extent=ext, cmap=LinearSegmentedColormap.from_list("o", [OCEAN, OCEAN]),
+                  interpolation="nearest", zorder=0)
+        im = ax.imshow(pct, extent=ext, cmap=RISK, vmin=0, vmax=100, interpolation="nearest", zorder=1)
+        ax.contour(top1.astype(float), levels=[0.5], colors="#111111", linewidths=0.7,
+                   extent=ext, origin="upper", zorder=3)
+        ax.scatter(fx, fy, s=1.4, c=FIRE_OVER, marker="s", linewidths=0, alpha=0.85, zorder=3)
+        ax.set_title(f"SMOLDER risk, issued {date}", fontsize=10.5, fontweight="bold",
+                     color=INK, pad=6)
+        ax.text(0.025, 0.04, f"{caught}/{nfire} in top-1% area ({100 * caught / max(nfire, 1):.0f}%)",
+                transform=ax.transAxes, fontsize=8.5, fontweight="bold", color=INK, zorder=5,
+                bbox=dict(fc="white", ec=MUTED, lw=0.6, alpha=0.92, pad=2.2))
 
         for c in (0, 1):
-            ax = axes[r, c]
-            base = np.zeros((*land.shape, 3), np.float32)
-            base[...] = (0.80, 0.89, 0.95); base[land] = (0.96, 0.96, 0.94)
-            ax.imshow(base, extent=ext, origin="upper", interpolation="nearest")
+            axes[r, c].set_xlim(ext[0], ext[1])
+            axes[r, c].set_ylim(ext[2], ext[3])
+            axes[r, c].set_aspect("equal")
+            _style_map(axes[r, c])
 
-            if c == 0:
-                yy, xx = np.where(truth)
-                ax.scatter(ext[0] + (xx+0.5)*PX, ext[3] - (yy+0.5)*PX, s=2.0,
-                           c="#b00000", marker="s", linewidths=0)
-                ax.set_title(f"Observed fire  ·  {date}", fontsize=11, fontweight="bold", pad=7)
-                ax.text(0.025, 0.045, f"{nfire} burned pixels", transform=ax.transAxes,
-                        fontsize=8.8, fontweight="bold",
-                        bbox=dict(fc="white", ec="0.65", lw=0.6, alpha=0.9, pad=2.2))
-            else:
-                # Shown as within-scene percentile, not raw sigmoid. The raw
-                # output is deliberately compressed (pos_weight buys ranking at
-                # the cost of calibration -- documented), so a 0-1 colour scale
-                # renders as flat orange and hides the structure. Percentile is
-                # also exactly how the model is used operationally: rank pixels,
-                # take the top k%.
-                from scipy.stats import rankdata
-                pm = np.full(p.shape, np.nan, np.float32)
-                pm[land] = 100.0 * (rankdata(p[land], method="average") - 1) / max(land.sum() - 1, 1)
-                im = ax.imshow(pm, extent=ext, origin="upper", cmap=RISK, vmin=0, vmax=100,
-                               interpolation="nearest")
-                ax.contour(top1.astype(float), levels=[0.5], colors="#111", linewidths=0.7,
-                           extent=ext, origin="upper")
-                yy, xx = np.where(truth)
-                ax.scatter(ext[0] + (xx+0.5)*PX, ext[3] - (yy+0.5)*PX, s=1.4,
-                           c="#0b3d91", marker="s", linewidths=0, alpha=0.85)
-                ax.set_title("SMOLDER predicted risk  ·  3 days ahead", fontsize=11,
-                             fontweight="bold", pad=7)
-                ax.text(0.025, 0.045,
-                        f"{caught}/{nfire} caught in top 1%  ({100*caught/max(nfire,1):.0f}%)",
-                        transform=ax.transAxes, fontsize=8.8, fontweight="bold",
-                        bbox=dict(fc="white", ec="0.65", lw=0.6, alpha=0.9, pad=2.2))
-                cb = fig.colorbar(im, ax=ax, fraction=0.045, pad=0.02)
-                cb.set_label("risk percentile\n(within scene)", fontsize=7.5); cb.ax.tick_params(labelsize=7)
-
-            ax.set_xticks([]); ax.set_yticks([])
-            for sp in ax.spines.values(): sp.set_linewidth(0.8)
-
-    handles = [Patch(facecolor="#b00000", label="Observed fire (left panels)"),
-               Patch(facecolor="#0b3d91", label="Observed fire overlaid on prediction"),
-               Patch(facecolor="none", edgecolor="#111", label="Model top 1% highest risk area"),
-               Patch(facecolor=(0.80, 0.89, 0.95), label="Ocean / masked")]
-    fig.legend(handles=handles, loc="lower center", ncol=4, fontsize=9,
-               frameon=True, bbox_to_anchor=(0.5, 0.004))
-    fig.suptitle("SMOLDER  |  predicted wildfire risk vs what actually burned\n"
-                 "2020 holdout year, never used for training or model selection",
-                 fontsize=13.5, fontweight="bold", y=0.997)
-    fig.subplots_adjust(bottom=0.055, top=0.945, hspace=0.10, wspace=0.02)
+    fig.subplots_adjust(left=0.08, right=0.98, top=0.955, bottom=0.085, hspace=0.2, wspace=0.18)
+    cax = fig.add_axes([0.56, 0.045, 0.40, 0.011])
+    cb = fig.colorbar(im, cax=cax, orientation="horizontal")
+    cb.set_label("Predicted risk, percentile within the patch", fontsize=9, color=INK)
+    cb.ax.tick_params(labelsize=8, colors=INK)
+    cb.outline.set_edgecolor(SPINE_COLOR)
+    handles = [Patch(facecolor=FIRE, label="Observed fire"),
+               Patch(facecolor=FIRE_OVER, label="Observed fire (on risk map)"),
+               Patch(facecolor="none", edgecolor="#111111", label="Top-1% risk area"),
+               Patch(facecolor=OCEAN, label="Ocean")]
+    fig.legend(handles=handles, loc="lower left", bbox_to_anchor=(0.06, 0.028), ncol=2,
+               fontsize=8.6, frameon=True, facecolor="white", edgecolor=MUTED)
+    fig.suptitle("Observed fire vs predicted risk, 2020 hold-out year",
+                 fontsize=13.5, fontweight="bold", color=INK, y=0.99)
     fig.savefig(OUT, dpi=250, bbox_inches="tight", facecolor="white")
-    print("wrote", OUT, flush=True)
+    print("wrote", OUT)
 
 
 if __name__ == "__main__":
-    main()
+    compute() if "--compute" in sys.argv else plot()

@@ -1,10 +1,6 @@
-"""Clean, self-explanatory architecture overview for SMOLDER.
-
-Design goal: a reader who has never seen this project should understand the
-whole idea in about ten seconds -- two input streams at different timescales,
-each read by a ConvLSTM, fused by attention, producing a risk map. Everything
-that is not needed for that story (channel counts, layer widths, tensor shapes)
-is deliberately left out; those live in the README table instead.
+"""SMOLDER architecture overview: two input streams at different timescales,
+each encoded by a ConvLSTM, fused by per-pixel cross-attention, producing a
+risk map. Channel lists are in fig_inputs.png; sizes are in the README.
 """
 import matplotlib
 matplotlib.use("Agg")
@@ -48,35 +44,41 @@ cube_stack(0.45, 5.75, 5, 1.5, 1.05, SLOW)
 ax.text(1.55, 5.34, "SLOW branch", fontsize=11.5, fontweight="bold", color=SLOW, ha="center")
 ax.text(1.55, 4.97, "144 days  ·  8 day bins", fontsize=9.6, color=INK, ha="center")
 ax.text(1.55, 4.62, "leaf area · soil moisture · rainfall", fontsize=8.8, color="#555", ha="center")
-ax.text(1.55, 4.02, "“how much fuel is there,\nand how dry is it?”", fontsize=9.4, color=SLOW,
-        ha="center", style="italic", linespacing=1.5)
+ax.text(1.55, 4.25, "fuel amount and dryness", fontsize=9.2, color=SLOW,
+        ha="center", style="italic")
 
 cube_stack(0.45, 2.05, 5, 1.5, 1.05, FAST)
 ax.text(1.55, 1.64, "FAST branch", fontsize=11.5, fontweight="bold", color=FAST, ha="center")
 ax.text(1.55, 1.27, "14 days  ·  daily", fontsize=9.6, color=INK, ha="center")
 ax.text(1.55, 0.92, "vapour deficit · surface temp · wind", fontsize=8.8, color="#555", ha="center")
-ax.text(1.55, 0.32, "“will it ignite\nand run today?”", fontsize=9.4, color=FAST,
-        ha="center", style="italic", linespacing=1.5)
+ax.text(1.55, 0.60, "+ fire detected up to the issue day", fontsize=8.8, color="#555", ha="center")
+ax.text(1.55, 0.18, "fire weather and recent fire", fontsize=9.2, color=FAST,
+        ha="center", style="italic")
 
 # ---------------------------------------------------------------- encoders
 ax.text(5.55, 7.95, "ENCODE  ·  ConvLSTM", fontsize=11.5, fontweight="bold",
         color=INK, ha="center")
 for y, col, lab in ((5.75, SLOW, "slow"), (2.05, FAST, "fast")):
     box(4.35, y, 2.4, 1.05, "#ffffff", col, lw=2.2)
-    ax.text(5.55, y + 0.70, "ConvLSTM", fontsize=11.5, fontweight="bold", color=col, ha="center")
-    ax.text(5.55, y + 0.36, "convolution = space\nrecurrence = time", fontsize=8.6,
+    ax.text(5.55, y + 0.80, "ConvLSTM", fontsize=11.5, fontweight="bold", color=col, ha="center")
+    ax.text(5.55, y + 0.22, "convolution = space\nrecurrence = time", fontsize=8.4,
             color="#555", ha="center", linespacing=1.35)
     arrow(3.95, y + 0.52, 4.3, y + 0.52, c=col)
 
-ax.text(5.55, 4.02, "each cell sees its neighbours\nAND remembers the past",
-        fontsize=9.2, color="#555", ha="center", style="italic", linespacing=1.5)
+box(4.0, 3.55, 3.1, 1.0, "#f7fafc", "#718096", lw=1.5)
+ax.text(5.55, 4.28, "static context, both branches", fontsize=9.0, fontweight="bold",
+        color="#4a5568", ha="center")
+ax.text(5.55, 3.68, "biomass · land mask · day of year\nland cover · climate zone",
+        fontsize=8.2, color="#666", ha="center", linespacing=1.4)
+arrow(5.55, 4.60, 5.55, 5.72, c="#718096", lw=1.6)
+arrow(5.55, 3.50, 5.55, 3.13, c="#718096", lw=1.6)
 
 # ---------------------------------------------------------------- fusion
 ax.text(9.15, 7.95, "FUSE  ·  cross attention", fontsize=11.5, fontweight="bold",
         color=INK, ha="center")
 box(8.0, 3.62, 2.3, 1.5, "#faf5ff", FUSE, lw=2.4)
 ax.text(9.15, 4.72, "cross attention", fontsize=11.5, fontweight="bold", color=FUSE, ha="center")
-ax.text(9.15, 3.98, "today's weather asks:\n“which fuel signal\nmatters here?”", fontsize=8.9,
+ax.text(9.15, 3.98, "each fast step queries\nthe slow state,\nper pixel", fontsize=8.9,
         color="#555", ha="center", linespacing=1.45)
 
 arrow(6.8, 6.27, 8.35, 5.18, c=SLOW)
@@ -84,12 +86,6 @@ arrow(6.8, 2.57, 8.35, 3.56, c=FAST)
 ax.text(7.32, 5.92, "key / value", fontsize=8.6, color=SLOW, ha="center", rotation=-31)
 ax.text(7.32, 3.18, "query", fontsize=8.6, color=FAST, ha="center", rotation=31)
 
-# static context
-box(8.0, 1.90, 2.3, 0.95, "#f7fafc", "#718096", lw=1.5)
-ax.text(9.15, 2.50, "static context", fontsize=9.6, fontweight="bold", color="#4a5568", ha="center")
-ax.text(9.15, 2.10, "biomass · land cover\nclimate zone · fire history", fontsize=8.3,
-        color="#666", ha="center", linespacing=1.4)
-arrow(9.15, 2.90, 9.15, 3.57, c="#718096", lw=1.7)
 
 # ---------------------------------------------------------------- output
 ax.text(13.0, 7.95, "PREDICT", fontsize=11.5, fontweight="bold", color=INK, ha="center")
@@ -105,15 +101,15 @@ ax.imshow(np.clip(risk, 0, 1), extent=[11.45, 14.55, 2.82, 5.92], cmap="YlOrRd",
 ax.add_patch(Rectangle((11.45, 2.82), 3.1, 3.1, fc="none", ec=OUT, lw=2.4, zorder=5))
 ax.text(13.0, 6.15, "fire risk per 1 km pixel", fontsize=10.6, fontweight="bold",
         color=OUT, ha="center")
-ax.text(13.0, 2.42, "probability of fire in the NEXT 3 DAYS", fontsize=9.6,
+ax.text(13.0, 2.42, "relative risk of fire in the next 3 days", fontsize=9.6,
         color=INK, ha="center", fontweight="bold")
 ax.text(13.0, 2.06, "continental Australia · 3474 × 4110 grid", fontsize=8.6,
         color="#666", ha="center")
 
 ax.text(7.6, -0.62,
-        "SMOLDER  |  Slow Memory Operator with Latent Dual attention for Estimating fire Risk.  The branches are read at "
-        "different rates because fuel dries over months while fire weather turns over hours.",
+        "SMOLDER  |  Slow-Memory Operator with Latent Dual-attention for Estimating fire Risk.  "
+        "Fuel state is read over 144 days, fire weather over 14 days.",
         fontsize=9.3, color="#444", ha="center", style="italic")
 
 fig.savefig("fig_smolder_architecture.png", dpi=300, bbox_inches="tight", facecolor="white")
-print("wrote figures/fig_smolder_architecture.png")
+print("wrote fig_smolder_architecture.png")

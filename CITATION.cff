@@ -1,0 +1,23 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below, together with the data records."
+title: "SMOLDER: next-3-day wildfire risk for continental Australia at 1 km"
+authors:
+  - family-names: "Müller"
+    given-names: "Korbinian"
+version: "1.0"
+date-released: "2026-09-26"
+license: MIT
+repository-code: "https://github.com/kmueller00/smolder-wildfire-australia"
+references:
+  - type: dataset
+    title: "SMOLDER 2020 hold-out test data cube (1 km daily)"
+    authors:
+      - family-names: "Müller"
+        given-names: "Korbinian"
+    doi: "10.5281/zenodo.22115979"
+  - type: dataset
+    title: "SMOLDER slow (8-day binned) cube and auxiliary rasters"
+    authors:
+      - family-names: "Müller"
+        given-names: "Korbinian"
+    doi: "10.5281/zenodo.21749290"

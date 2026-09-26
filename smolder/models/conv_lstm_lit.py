@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from seasfire.backbones.conv_lstm import ConvLSTMSeg
+from smolder.models.backbones.conv_lstm import ConvLSTMSeg
 
 logger = logging.getLogger(__name__)
 

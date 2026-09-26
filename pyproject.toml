@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "smolder"
+version = "1.0.0"
+description = "SMOLDER: next-3-day wildfire risk for continental Australia at 1 km (dual-timescale ConvLSTM)"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+authors = [{ name = "Korbinian Müller" }]
+dependencies = [
+    "torch>=2.0",
+    "lightning>=2.0",
+    "zarr>=2.13,<3",
+    "numcodecs",
+    "numpy",
+    "scipy",
+    "pandas",
+    "scikit-learn",
+    "matplotlib",
+    "xarray",
+]
+
+[tool.setuptools.packages.find]
+include = ["smolder*"]
+
+[tool.setuptools.package-data]
+"smolder.data" = ["*.json"]
