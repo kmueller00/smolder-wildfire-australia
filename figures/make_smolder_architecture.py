@@ -7,9 +7,10 @@ Two steps:
   python make_smolder_architecture.py             draws the figure from that file
 
 The patch is a fire-active 384 x 384 px window on the issue day 2020-11-15.
-The output stack shows the model's risk maps for the last three fast time
-steps when a checkpoint was available at extraction, otherwise the observed
-target for the same steps.
+Every stack shows all time slices the model uses (18 slow bins, 14 fast
+days, 3 fire-history windows). The output stack has one map per fast time
+step: the model's risk maps when a checkpoint was available at extraction,
+otherwise the observed target for the same steps.
 """
 import os
 import sys
@@ -28,7 +29,6 @@ CACHE = os.path.join(HERE, "data", "architecture_patch.npz")
 OUT = os.path.join(HERE, "fig_smolder_architecture.png")
 PATCH, THUMB = 384, 128
 ISSUE_DAY = 319                      # 2020-11-15, index in the 2020 cube
-N_FRAMES = 5
 
 
 # ----------------------------------------------------------------- extraction
@@ -58,7 +58,7 @@ def extract():
     land = lm[sl]
 
     names = list(g.attrs["channels"])
-    fast_days = np.linspace(D - 13, D, N_FRAMES).round().astype(int)
+    fast_days = np.arange(D - 13, D + 1)
     X = np.asarray(g["X"][D - 13:D + 1, sl[0], sl[1], :], np.float32)
     out = dict(y0=y0, x0=x0, date=np.array(g.attrs["time"][D]),
                land=_block(land.astype(np.float32), "mean") > 0.5)
@@ -74,7 +74,7 @@ def extract():
     gday = 1826 + D
     starts = np.asarray(sc["bin_start_day"][...])
     b_end = int(np.searchsorted(starts, gday - 7, side="right"))
-    bins = np.linspace(b_end - 18, b_end - 1, N_FRAMES).round().astype(int)
+    bins = np.arange(b_end - 18, b_end)
     S = np.asarray(sc["X_slow"][bins[0]:bins[-1] + 1, sl[0], sl[1], :], np.float32)
     for key, c in (("lai", 0), ("sm", 1), ("ppt", 2)):
         out[key] = np.stack([masked(S[b - bins[0], :, :, c]) for b in bins])
@@ -89,7 +89,7 @@ def extract():
     out["koppen"] = np.where(_block(land.astype(np.float32), "mean") > 0.5,
                              np.asarray(g["koppen_geiger"][sl])[1::3, 1::3], 0).astype(np.uint8)
 
-    steps = [D - 2, D - 1, D]
+    steps = list(range(D - 13, D + 1))
     out["target"] = np.stack([_block((((g["y_fire_3d"][s][sl] > 0) & land)).astype(np.float32), "max")
                               for s in steps]).astype(np.float16)
     ckpt = os.environ.get("CKPT", os.path.join(os.path.dirname(HERE), "checkpoints", "smolder_swa.ckpt"))
@@ -107,7 +107,7 @@ def extract():
             fire_history_lags=(3, 4, 5), fire_history_distance=True))
         b = ds.sample_at(D + 1, y0, x0)      # last step forecasts days D+1..D+3
         with torch.no_grad():
-            p = torch.sigmoid(m.forward_seq(b["x_slow"][None], b["x_fast"][None], b["x_cat"][None]))[0, -3:].numpy()
+            p = torch.sigmoid(m.forward_seq(b["x_slow"][None], b["x_fast"][None], b["x_cat"][None]))[0].numpy()
         pct = []
         for pi in p:
             r = np.full(pi.shape, np.nan, np.float32)
@@ -137,14 +137,31 @@ def arrow(ax, x1, y1, x2, y2, c=LINE, lw=1.4, z=6):
                                  lw=lw, color=c, zorder=z, shrinkA=0, shrinkB=0))
 
 
-def stack(ax, frames, x, y, size, cmap, vmin, vmax, dx=1.3, dy=1.0, z0=3):
-    """Time slices drawn back (oldest) to front (newest), offset diagonally."""
+OCEAN = "#CFE0EC"
+COAST = "#1F1F22"
+LAND = None                     # set in draw(): land mask at thumbnail resolution
+
+
+def coast(ax, x, y, size, z):
+    ax.contour(LAND.astype(float), levels=[0.5], colors=COAST, linewidths=0.7, zorder=z,
+               extent=[x, x + size, y + size, y], origin="upper")
+
+
+def stack(ax, frames, x, y, size, cmap, vmin, vmax, dx=None, dy=None, z0=3):
+    """All time slices, oldest at the back, newest at the front. Offsets shrink
+    with the number of slices so a stack's footprint stays about the same."""
     n = len(frames)
+    dx = (0.38 * size) / max(n - 1, 1) if dx is None else dx
+    dy = 0.55 * dx if dy is None else dy
     for i, fr in enumerate(frames):
         ox, oy = x + (n - 1 - i) * dx, y + (n - 1 - i) * dy
+        z = z0 + 3 * i
         ax.imshow(np.asarray(fr, np.float32), extent=[ox, ox + size, oy, oy + size], cmap=cmap,
-                  vmin=vmin, vmax=vmax, interpolation="nearest", zorder=z0 + 2 * i, origin="upper")
-        rect(ax, ox, oy, size, size, ec="#555558", lw=0.6, z=z0 + 2 * i + 1)
+                  vmin=vmin, vmax=vmax, interpolation="nearest", zorder=z, origin="upper")
+        rect(ax, ox, oy, size, size, ec="#555558", lw=0.45, z=z + 1)
+    coast(ax, x, y, size, z0 + 3 * n)
+    ax.text(x + size + (n - 1) * dx + 0.4, y + size + (n - 1) * dy - 0.2, f"{n}", fontsize=7.2,
+            color=MUTED, ha="left", va="top")
     return x + (size + (n - 1) * dx) / 2          # horizontal centre of the stack
 
 
@@ -154,7 +171,7 @@ def rng(a, lo=2, hi=98):
     return (float(np.percentile(v, lo)), float(np.percentile(v, hi))) if v.size else (0.0, 1.0)
 
 
-def with_bad(name, bad="#D9D9DC"):
+def with_bad(name, bad=OCEAN):
     cm = plt.get_cmap(name).copy()
     cm.set_bad(bad)
     return cm
@@ -167,7 +184,9 @@ def label(ax, x, y, text, **kw):
 
 
 def draw():
+    global LAND
     d = np.load(CACHE, allow_pickle=False)
+    LAND = np.asarray(d["land"])
     fig, ax = plt.subplots(figsize=(17.0, 8.9))
     ax.set_xlim(0, 170)
     ax.set_ylim(-5, 86)
@@ -197,12 +216,12 @@ def draw():
                                       ("lst", "Land surface\ntemperature", "magma"),
                                       ("wind", "Wind speed", "cividis"))):
         lo, hi = rng(d[k])
-        c = stack(ax, d[k], 4 + i * 18.0, 21.5, 10.2, with_bad(cm), lo, hi, dx=1.15, dy=0.9)
+        c = stack(ax, d[k], 4 + i * 18.0, 21.5, 10.2, with_bad(cm), lo, hi)
         label(ax, c, 20.0, lab)
     fire_cm = ListedColormap(["#F2F2F4", "#B2182B"])
-    fire_cm.set_bad("#D9D9DC")
+    fire_cm.set_bad(OCEAN)
     fh = np.where(d["land"][None], np.asarray(d["fire_hist"], np.float32), np.nan)
-    c = stack(ax, fh, 58.5, 21.5, 10.2, fire_cm, 0, 1, dx=1.15, dy=0.9)
+    c = stack(ax, fh, 58.5, 21.5, 10.2, fire_cm, 0, 1)
     label(ax, c, 20.0, "Fire history\n(VIIRS)")
 
     # ---- (a) static layers
@@ -218,6 +237,7 @@ def draw():
         ax.imshow(a, extent=[x0, x0 + 7.5, 3.0, 10.5], cmap=with_bad(cm), vmin=lo, vmax=hi,
                   interpolation="nearest", zorder=3)
         rect(ax, x0, 3.0, 7.5, 7.5, ec="#555558", lw=0.6, z=4)
+        coast(ax, x0, 3.0, 7.5, 5)
         ax.text(x0 + 3.75, 11.4, lab, ha="center", fontsize=8.0, color=INK)
 
     # ---- (b) unrolled ConvLSTM chains
@@ -239,39 +259,42 @@ def draw():
     arrow(ax, 77.0, 58.0, 81.8, 62.0, c=ACCENT)
     arrow(ax, 77.0, 28.0, 81.8, 30.0, c=ACCENT2)
 
-    # ---- (c) fusion
-    rect(ax, 120.0, 38.0, 19.0, 16.0, ec=FUSE, fc="white", lw=1.8, z=3)
-    ax.text(129.5, 49.6, "Cross attention", ha="center", fontsize=9.6, fontweight="bold", color=FUSE)
-    ax.text(129.5, 45.6, "4 heads, per pixel", ha="center", fontsize=8.2, color=INK)
-    ax.text(129.5, 41.6, "softmax(Q Kᵀ / √d) V", ha="center", fontsize=8.4, color=INK)
-    arrow(ax, 113.6, 62.0, 124.0, 54.2, c=ACCENT)
-    ax.text(120.2, 61.2, "K, V", fontsize=8.4, color=ACCENT, fontweight="bold")
-    ax.text(120.2, 58.4, "final slow state", fontsize=7.2, color=MUTED)
-    arrow(ax, 113.6, 30.0, 124.0, 37.8, c=ACCENT2)
-    ax.text(117.6, 35.6, "Q", fontsize=8.4, color=ACCENT2, fontweight="bold")
-    ax.text(119.6, 31.4, "fast state,\nevery step", fontsize=7.2, color=MUTED, va="top", linespacing=1.2)
-    rect(ax, 120.0, 14.0, 19.0, 10.0, ec=FRAME_EC, fc="white", lw=1.4, z=3)
-    ax.text(129.5, 20.6, f"1 {TIMES} 1 convolution", ha="center", fontsize=8.8, fontweight="bold", color=INK)
-    ax.text(129.5, 16.8, "and sigmoid", ha="center", fontsize=8.4, color=INK)
-    arrow(ax, 129.5, 37.8, 129.5, 24.2)
+    # ---- (c) fusion: one block, attention and output head side by side
+    rect(ax, 118.5, 36.0, 22.0, 20.0, ec=FUSE, fc="white", lw=1.8, z=3)
+    ax.plot([129.5, 129.5], [37.5, 54.5], color="#B9A6E6", lw=0.9, zorder=4)
+    ax.text(124.0, 51.4, "Cross\nattention", ha="center", va="center", fontsize=8.8,
+            fontweight="bold", color=FUSE, linespacing=1.15, zorder=4)
+    ax.text(124.0, 44.2, "4 heads,\nper pixel", ha="center", va="center", fontsize=7.6, color=INK, zorder=4)
+    ax.text(135.0, 51.4, f"1 {TIMES} 1\nconv", ha="center", va="center", fontsize=8.8,
+            fontweight="bold", color=INK, linespacing=1.15, zorder=4)
+    ax.text(135.0, 44.2, "sigmoid", ha="center", va="center", fontsize=7.6, color=INK, zorder=4)
+    arrow(ax, 128.0, 47.0, 131.6, 47.0, lw=1.1)
+    arrow(ax, 113.6, 62.0, 122.0, 56.2, c=ACCENT)
+    ax.text(118.2, 64.6, "K, V", fontsize=8.4, color=ACCENT, fontweight="bold")
+    ax.text(118.2, 62.4, "final slow state", fontsize=7.2, color=MUTED, va="top")
+    arrow(ax, 113.6, 30.0, 122.0, 35.8, c=ACCENT2)
+    ax.text(118.2, 30.6, "Q", fontsize=8.4, color=ACCENT2, fontweight="bold", va="top")
+    ax.text(118.2, 28.2, "fast state,\nevery step", fontsize=7.2, color=MUTED, va="top", linespacing=1.2)
+    ax.text(129.5, 22.0, "Applied at every fast time\nstep; the last step is\nthe forecast",
+            ha="center", va="top", fontsize=7.6, color=MUTED)
 
     # ---- (d) output
-    arrow(ax, 139.2, 19.0, 147.4, 40.0)
+    arrow(ax, 140.6, 46.0, 146.6, 46.0)
     if bool(d["has_pred"]):
         out = np.asarray(d["pred"], np.float32)
         cm_out, vmin, vmax, lab = with_bad("YlOrRd"), 0, 100, "Predicted fire risk\n(percentile within patch)"
     else:
         out = np.where(d["land"][None], np.asarray(d["target"], np.float32), np.nan)
         cm_out, vmin, vmax, lab = fire_cm, 0, 1, "Observed target\n(VIIRS fire)"
-    c = stack(ax, out, 147.0, 40.0, 15.0, cm_out, vmin, vmax, dx=1.6, dy=1.3)
-    label(ax, c, 37.6, lab, fontsize=9.0, fontweight="bold")
-    label(ax, c, 31.0, "Fire on days D+1 to D+3,\none map per time step,\nlast three steps shown",
+    c = stack(ax, out, 147.0, 38.0, 13.0, cm_out, vmin, vmax)
+    label(ax, c, 36.4, lab, fontsize=9.0, fontweight="bold")
+    label(ax, c, 31.0, "Fire on days D+1 to D+3,\none map per fast time step",
           fontsize=8.0, color=MUTED)
 
     ax.text(85, -1.2,
             f"All rasters are real data for one 384 {TIMES} 384 px patch (about 384 km across) on the "
-            f"0.01° grid, issue day D = {str(d['date'])}. Stacks show time slices, oldest at the back. "
-            "Grey marks ocean or missing data.",
+            f"0.01° grid, issue day D = {str(d['date'])}.\nEach stack shows all time slices used (count at top right), "
+            "oldest at the back. Blue is ocean; black lines are the coastline.",
             ha="center", va="top", fontsize=8.8, color=MUTED)
     fig.savefig(OUT, dpi=300, bbox_inches="tight", facecolor="white")
     print("wrote", OUT)
