@@ -57,7 +57,7 @@ by carrying the last observation forward. The original cubes also hold NDVI
 | Optimiser | AdamW, lr 3 × 10⁻⁴, weight decay 0.01, cosine schedule with a 25-epoch period, up to 40 epochs, early stopping on validation AP (patience 6) |
 | Loss | BCE on soft labels (fire 0.9, background 0.02), plus 0.3 × Dice for epochs 0 to 2; positive weight annealed 100 → 20 over 8 epochs; isolated fire pixels up-weighted (γ = 2); auxiliary loss on every fast time step (weight 0.3) |
 | Sampling | 30 % of patches must contain fire absent from the fire history; fire-history channels zeroed for 30 % of samples |
-| Released weights | average of the three best checkpoints by validation AP |
+| Released weights | average of the three best checkpoints by validation AP (epochs 13, 14, 18) |
 
 The exact configuration is in [configs/smolder.env](configs/smolder.env).
 
@@ -65,17 +65,33 @@ The exact configuration is in [configs/smolder.env](configs/smolder.env).
 
 ## Results, 2020 hold-out year
 
-> **Pending.** The model is being retrained after the correction described
-> below. AUC-PR, ROC-AUC, lift tables and the figures in this section will be
-> added when training and evaluation have finished.
+| Metric | Value |
+|---|---|
+| AUC-PR (average precision) | **0.090** |
+| ROC-AUC | 0.851 |
+| Base rate (fire pixels among evaluated land pixels) | 0.16 % |
+| Mean share of fire captured in the top 0.5 % of each patch | 29 % |
+| Lift at top 0.5 %, all fire | 58.5× |
+| Lift at top 0.5 %, new fire | 13.6× |
 
 ![lift curve](figures/fig_lift_curve.png)
+
+| Top-k | TPR, all fire | Lift, all fire | TPR, new fire | Lift, new fire |
+|---|---|---|---|---|
+| 0.01 % | 0.027 | 271.9× | 0.000 | 1.5× |
+| 0.1 % | 0.140 | 139.7× | 0.006 | 6.1× |
+| 0.2 % | 0.201 | 100.6× | 0.022 | 11.1× |
+| 0.5 % | 0.292 | 58.5× | 0.068 | 13.6× |
+| 1 % | 0.361 | 36.1× | 0.123 | 12.3× |
+| 2 % | 0.426 | 21.3× | 0.193 | 9.7× |
+| 5 % | 0.508 | 10.2× | 0.305 | 6.1× |
+| 10 % | 0.572 | 5.7× | 0.403 | 4.0× |
 
 **Evaluation protocol.** 1500 patches of 384 × 384 px are drawn with a
 fixed seed from fire-active scenes (≥ 45 fire pixels and ≥ 50 % land per
 patch). The results therefore measure how well SMOLDER ranks pixels *where
 fire occurs*, not the continent-wide false-alarm rate. AUC-PR and ROC-AUC are
-pooled over all land pixels of all patches. TPR and lift are computed per patch
+pooled over all 189.2 M land pixels of all patches. TPR and lift are computed per patch
 (top-k of that patch's land pixels) and averaged. *New fire* is target fire
 more than 3 px (taxicab distance) from any fire in the newest fire-history
 window, i.e. fire detected on days D−2 to D. Reproduce with
@@ -96,15 +112,19 @@ how much fire history is considered, and the resulting lift depends on both.
 
 ![new-fire distance dependence](figures/fig_newfire_distance_decay.png)
 
-Results for the retrained model will be added here.
+With the headline definition (3 px, one history window) 61 % of fire
+pixels count as new and the lift is 11.6×. Requiring 10 px from any fire
+in the same window leaves 41 % of fire pixels at a lift of 2.2×.
+Extending the history to 30 windows (32 days) at 10 px leaves 19 % of
+fire pixels, and the lift falls to 0.14×, below random: fire that is
+far from anything that burned in the past month is not anticipated.
 
 ## Limitations
 
-- **Skill depends on fire that is already burning.** During development,
-  skill was concentrated near recent fire: spread, flare-ups and
-  re-detection. The previous model ranked isolated new ignitions (more than
-  10 km from recent fire) no better than random; this will be re-measured
-  for the retrained model. The immediate cause of
+- **Skill depends on fire that is already burning.** Skill is concentrated
+  near recent fire: spread, flare-ups and re-detection. Ignitions more than
+  10 km from any fire of the past month are ranked below random
+  (0.14× lift; see the figure above). The immediate cause of
   an isolated ignition (a lightning strike, a spark) is a point event with no
   precursor in any 1 km daily field, so part of this limit is probably
   irreducible at this resolution.
@@ -115,7 +135,7 @@ Results for the retrained model will be added here.
   were each tested. None improved hold-out skill beyond evaluation noise, so
   none is used. These tests were run before the fire-history correction
   described below, while the model still had access to first-day detections.
-  They should be repeated before the plateau is taken as settled. Likely
+  They are being repeated with the corrected model. Likely
   reasons for a genuine plateau: sub-kilometre fuel continuity and ignition
   sources are averaged away at 1 km, and weather at 12 to 25 km resolution
   varies little between neighbouring pixels.
@@ -137,8 +157,9 @@ most recent fire-history input covered detections up to and including the
 first day of the target window, a one-day overlap between input and label:
 30 % of target fire pixels were visible in the input only through this
 overlap. The released model is retrained with fire history that ends on the
-issue day for every time step. Results for the corrected model will be
-added to this README when its training has finished.
+issue day for every time step. All results above are from the corrected
+model; its all-fire lift at the top 0.5 % is 58.5× instead of 103×, while
+the new-fire lift is almost unchanged (13.6× instead of 14.5×).
 
 ## Data
 
@@ -178,7 +199,7 @@ pip install -e .
 
 export SMOLDER_DATA=/path/to/zarr/stores   # holds cube_2020_zenodo.zarr and cube_slow_8day.zarr
 
-python -m smolder.evaluation.evaluate                   # headline metrics (needs checkpoints/smolder_swa.ckpt)
+python -m smolder.evaluation.evaluate                   # headline metrics (GPU recommended)
 python -m smolder.evaluation.newfire_definition_sweep   # distance dependence of new-fire lift
 
 # training (needs the 2015-2019 cubes)
@@ -196,7 +217,7 @@ smolder/
   training/     training entry point
   evaluation/   evaluation, distance sweep, checkpoint averaging, recalibration
 configs/        training configuration of the released model
-checkpoints/    released weights (smolder_swa.ckpt, added after retraining)
+checkpoints/    released weights (smolder_swa.ckpt)
 results/        evaluation outputs behind every figure and table
 figures/        figures and the scripts that draw them
 ```

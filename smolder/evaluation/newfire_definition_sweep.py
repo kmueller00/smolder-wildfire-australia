@@ -95,9 +95,14 @@ def main():
             patch_size=PATCH, samples_per_epoch=N_PATCH * 3, seed=21,
             min_pos_pixels=MIN_POS, pos_frac=1.0, deterministic=True,
             fire_history=fh, fire_history_lags=(3, 4, 5), fire_history_distance=fh,
-            use_lightning=os.environ.get("USE_LIGHTNING", "0") == "1" and not fh,
-            use_slope_aspect=os.environ.get("USE_SLOPE_ASPECT", "0") == "1" and not fh,
-            use_wind_dir=os.environ.get("USE_WIND_DIR", "0") == "1" and not fh))
+            use_lightning=os.environ.get("USE_LIGHTNING", "0") == "1",
+            use_elevation=os.environ.get("USE_ELEVATION", "0") == "1",
+            use_slope_aspect=os.environ.get("USE_SLOPE_ASPECT", "0") == "1",
+            use_fuel_age=os.environ.get("USE_FUEL_AGE", "0") == "1",
+            use_wind_dir=os.environ.get("USE_WIND_DIR", "0") == "1",
+            use_ffdi=os.environ.get("USE_FFDI", "0") == "1",
+            use_fmc=os.environ.get("USE_FMC", "0") == "1",
+            fmc_store=os.environ.get("FMC_STORE", "fmc_weekly_ff.zarr") and not fh))
 
     # NO_FIREHIST lists which members were trained without fire history
     # (colon-separated indices), so each gets the input layout it expects.

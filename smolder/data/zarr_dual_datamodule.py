@@ -125,6 +125,11 @@ class DualPatchConfig:
     # Downwind-of-recent-fire wind alignment (BARRA2 AUS-11). +2.4% AP on top
     # of the above, ranked 12/19 by SHAP -- see aux_xgb_check_wind.py.
     use_wind_dir: bool = False
+    # McArthur FFDI and Griffiths drought factor from SILO (ffdi_<year>.zarr),
+    # and Sentinel-2 live fuel moisture (DEA ga_s2_fmc_3_v1) on the model grid.
+    use_ffdi: bool = False
+    use_fmc: bool = False
+    fmc_store: str = "fmc_weekly_ff.zarr"
     # Random flip (east-west mirror) + k*90deg rotation, TRAIN ONLY (val_ds
     # uses deterministic=True, unaffected regardless of this flag). Was never
     # implemented for this datamodule (only the old v1/v2 single-branch one
@@ -197,17 +202,24 @@ class DualWindowDataset(Dataset):
         # cube-year from aux_rasters/wind_dir/barra_uv_{year}.npz (one npz per
         # calendar year, day-0 aligned with that cube's day-0).
         self.use_wind_dir = bool(getattr(cfg, "use_wind_dir", False))
+        self.use_ffdi = bool(getattr(cfg, "use_ffdi", False))
+        self.use_fmc = bool(getattr(cfg, "use_fmc", False))
+        self.cube_year: Dict[int, int] = {
+            ci: int(str(g.attrs["time"][0])[:4]) for ci, g in enumerate(self.groups)}
         self.wind_cache: Dict[int, Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]] = {}
-        self.cube_year: Dict[int, int] = {}
         if self.use_wind_dir:
-            wind_dir = str(data_dir() / "aux_rasters" / "wind_dir")
-            for ci, p in enumerate(cfg.zarr_paths):
-                year = int(Path(str(p)).stem.split("_")[-1])
-                self.cube_year[ci] = year
-                if year not in self.wind_cache:
-                    npz_path = os.path.join(wind_dir, f"barra_uv_{year}.npz")
-                    d = np.load(npz_path)
-                    self.wind_cache[year] = (d["u"], d["v"], d["lat"], d["lon"])
+            for year in set(self.cube_year.values()):
+                d = np.load(data_dir() / "aux_rasters" / "wind_dir" / f"barra_uv_{year}.npz")
+                self.wind_cache[year] = (d["u"], d["v"], d["lat"], d["lon"])
+        self.ffdi_groups = {}
+        if self.use_ffdi:
+            for year in set(self.cube_year.values()):
+                self.ffdi_groups[year] = open_zarr_root(f"ffdi_{year}.zarr")
+        self.fmc_group = None
+        if self.use_fmc:
+            self.fmc_group = open_zarr_root(str(getattr(cfg, "fmc_store", "fmc_weekly_ff.zarr")))
+            self.fmc_bin_days = int(self.fmc_group.attrs["days_per_bin"])
+            self.fmc_epoch = str(self.fmc_group.attrs["epoch"])
 
         # ---- normalization ----
         stats = json.loads(resolve_stats(cfg.stats_path).read_text())
@@ -633,61 +645,85 @@ class DualWindowDataset(Dataset):
                 chans.append(dist)
             x_fast = np.concatenate([x_fast] + chans, axis=-1).astype(np.float32)
 
-        # ---- fuel age: days since this pixel last had fire (leakage-free) ----
-        # Different from fire_history above (short-range, 3-5 day proximity-in-
-        # time): this is a long-range fuel-accumulation proxy. Window ends at
-        # t_end-3 (same leakage cutoff), scans fuel_age_lookback days back,
-        # censored at the lookback if no fire found. Passed the XGBoost gate
-        # together with slope/aspect: +22.3% AP on top of elevation alone;
-        # ranked 9/18 by SHAP, right behind elevation. See aux_xgb_check.py.
+        # ---- optional per-step features --------------------------------------
+        # Fast step j is issued on day s_j = t_end - t_fast + j and trained on
+        # y_fire_3d[s_j] (fire on days s_j+1..s_j+3). Every feature below uses
+        # only information up to day s_j: fire from y_fire_3d[<= s_j-3], wind
+        # and FFDI on day s_j, fuel moisture from the last complete week.
+        T = self.t_fast
+        steps = [t_end - T + j for j in range(T)]
+
+        def _recent_fire(s_j):
+            if s_j - 3 < 0:
+                return np.zeros((self.ph, self.pw), bool)
+            ci_h, lt_h = self._locate(s_j - 3)
+            return (np.asarray(self.groups[ci_h][cfg.y_key][lt_h, y0:y0 + self.ph, x0:x0 + self.pw]) > 0) & (lm_p > 0)
+
         if self.use_fuel_age:
             LB = self.fuel_age_lookback
-            hist = self._read_y_span(t_end - 3, LB, cfg.y_key) > 0   # ends at y_fire_3d[t_end-4]
-            idx = np.arange(hist.shape[0])[:, None, None]
-            last_idx = np.where(hist, idx, -1).max(axis=0)
-            fuel_age = np.where(last_idx >= 0, (hist.shape[0] - 1 - last_idx), LB).astype(np.float32)
-            fuel_age_n = (fuel_age - LB / 2.0) / (LB / 2.0)           # roughly [-1, 1]
-            fa_fast = np.broadcast_to(fuel_age_n[None, :, :, None],
-                                       (self.t_fast, self.ph, self.pw, 1))
-            x_fast = np.concatenate([x_fast, np.ascontiguousarray(fa_fast.astype(np.float32))], axis=-1)
+            e0 = steps[0] - 3                                  # newest history index of step 0
+            hist = (self._read_y_span(e0 + 1, LB, cfg.y_key) > 0) & (lm_p > 0)[None]   # y_fire_3d[e0-LB+1 .. e0], land only
+            idx = np.arange(LB)[:, None, None]
+            last = np.where(hist, idx, -10 ** 6).max(axis=0) + (e0 - LB + 1)   # absolute index
+            fa = np.empty((T, self.ph, self.pw, 1), np.float32)
+            for j, s_j in enumerate(steps):
+                e = s_j - 3
+                if j > 0:
+                    last = np.where(_recent_fire(s_j), e, last)
+                age = np.minimum(e - last, LB).astype(np.float32)
+                fa[j, :, :, 0] = (age - LB / 2.0) / (LB / 2.0)
+            x_fast = np.concatenate([x_fast, fa], axis=-1)
 
-        # ---- downwind-of-recent-fire wind alignment ----
-        # +2.4% AP on top of the 18-feature model (elevation+slope+aspect+
-        # fuel_age), ranked 12/19 by SHAP -- smaller than fuel_age/elevation
-        # but real. Uses BARRA2 AUS-11 (~11km BOM regional reanalysis) wind at
-        # t_end and the same lag-3 "recent fire" mask fire_history uses.
-        # downwind_align in [-1,1]: +1 = wind blows FROM recent fire directly
-        # TOWARD this pixel. See aux_xgb_check_wind.py.
         if self.use_wind_dir:
-            tg3 = t_end - 1 - 3
-            ci_h3, lt_h3 = self._locate(tg3)
-            fh3_wd = (np.asarray(self.groups[ci_h3][cfg.y_key][lt_h3, y0:y0 + self.ph, x0:x0 + self.pw]) > 0)
             from scipy import ndimage as _ndi
-            if fh3_wd.any():
-                dist_px, (near_r, near_c) = _ndi.distance_transform_edt(~fh3_wd, return_indices=True)
-                rr, cc = np.meshgrid(np.arange(self.ph), np.arange(self.pw), indexing="ij")
-                vec_south = (rr - near_r).astype(np.float32)
-                vec_east = (cc - near_c).astype(np.float32)
-                vnorm = np.sqrt(vec_south ** 2 + vec_east ** 2) + 1e-6
-                vec_south /= vnorm; vec_east /= vnorm
-            else:
-                vec_south = np.zeros((self.ph, self.pw), np.float32)
-                vec_east = np.zeros((self.ph, self.pw), np.float32)
-                dist_px = np.full((self.ph, self.pw), 999.0, np.float32)
-
-            year_t = self.cube_year[ci_t]
-            u_all, v_all, wlat, wlon = self.wind_cache[year_t]
             lat_c = GRID_LAT0 - (y0 + self.ph / 2) * GRID_PX
             lon_c = GRID_LON0 + (x0 + self.pw / 2) * GRID_PX
-            li = int(np.abs(wlat - lat_c).argmin()); lj = int(np.abs(wlon - lon_c).argmin())
-            uw = float(u_all[lt_t, li, lj]); vw = float(v_all[lt_t, li, lj])   # eastward, northward m/s
-            wnorm = (uw ** 2 + vw ** 2) ** 0.5 + 1e-6
-            wind_south = -vw / wnorm; wind_east = uw / wnorm   # met v=northward -> south = -v
-            downwind_align = (wind_south * vec_south + wind_east * vec_east).astype(np.float32)
-            downwind_align = np.where(dist_px < 900, downwind_align, 0.0)
-            wd_fast = np.broadcast_to(downwind_align[None, :, :, None],
-                                       (self.t_fast, self.ph, self.pw, 1))
-            x_fast = np.concatenate([x_fast, np.ascontiguousarray(wd_fast.astype(np.float32))], axis=-1)
+            rr, cc = np.meshgrid(np.arange(self.ph), np.arange(self.pw), indexing="ij")
+            wd = np.zeros((T, self.ph, self.pw, 1), np.float32)
+            for j, s_j in enumerate(steps):
+                fire = _recent_fire(s_j)
+                if not fire.any():
+                    continue
+                dist_px, (near_r, near_c) = _ndi.distance_transform_edt(~fire, return_indices=True)
+                vs = (rr - near_r).astype(np.float32); ve = (cc - near_c).astype(np.float32)
+                vn = np.sqrt(vs ** 2 + ve ** 2) + 1e-6
+                ci_w, lt_w = self._locate(s_j)
+                u_all, v_all, wlat, wlon = self.wind_cache[self.cube_year[ci_w]]
+                li = int(np.abs(wlat - lat_c).argmin()); lj = int(np.abs(wlon - lon_c).argmin())
+                uw = float(u_all[lt_w, li, lj]); vw = float(v_all[lt_w, li, lj])
+                wn = (uw ** 2 + vw ** 2) ** 0.5 + 1e-6
+                wd[j, :, :, 0] = ((-vw / wn) * vs / vn + (uw / wn) * ve / vn) * (dist_px > 0)
+            x_fast = np.concatenate([x_fast, wd], axis=-1)
+
+        if self.use_ffdi:
+            fd = np.zeros((T, self.ph, self.pw, 2), np.float32)
+            for j, s_j in enumerate(steps):
+                ci_f, lt_f = self._locate(s_j)
+                gfd = self.ffdi_groups[self.cube_year[ci_f]]
+                if lt_f < gfd["ffdi"].shape[0]:
+                    fd[j, :, :, 0] = np.asarray(gfd["ffdi"][lt_f, y0:y0 + self.ph, x0:x0 + self.pw], np.float32) / 50.0
+                    fd[j, :, :, 1] = np.asarray(gfd["df"][lt_f, y0:y0 + self.ph, x0:x0 + self.pw], np.float32) / 250.0
+            x_fast = np.concatenate([x_fast, np.nan_to_num(fd)], axis=-1)
+
+        if self.use_fmc:
+            import datetime as _dt
+            ep0 = _dt.date.fromisoformat(self.fmc_epoch)
+            fm = np.zeros((T, self.ph, self.pw, 2), np.float32)
+            cache = {}
+            for j, s_j in enumerate(steps):
+                ci_f, lt_f = self._locate(s_j)
+                day = _dt.date(self.cube_year[ci_f], 1, 1) + _dt.timedelta(days=int(lt_f))
+                mi = (day - ep0).days // self.fmc_bin_days - 1     # last COMPLETE week before day s_j
+                if not 0 <= mi < self.fmc_group["fmc"].shape[0]:
+                    continue
+                if mi not in cache:
+                    raw = np.asarray(self.fmc_group["fmc"][mi, y0:y0 + self.ph, x0:x0 + self.pw])
+                    seen = raw != 255
+                    st = np.asarray(self.fmc_group["staleness"][mi, y0:y0 + self.ph, x0:x0 + self.pw]).astype(np.float32)
+                    cache[mi] = (np.where(seen, raw / 100.0, 0.0),
+                                 np.where(seen, 1.0 - np.minimum(st, 12.0) / 12.0, 0.0))
+                fm[j, :, :, 0], fm[j, :, :, 1] = cache[mi]
+            x_fast = np.concatenate([x_fast, fm], axis=-1)
 
         # Fire-history feature dropout (TRAIN only): blank fire_hist_t-3/4/5 +
         # fire_dist to 0 for this sample with probability fire_history_dropout_
@@ -812,6 +848,9 @@ class DualDataModule(pl.LightningDataModule):
         use_fuel_age: bool = False,
         fuel_age_lookback: int = 250,
         use_wind_dir: bool = False,
+        use_ffdi: bool = False,
+        use_fmc: bool = False,
+        fmc_store: str = "fmc_weekly_ff.zarr",
         augment: bool = False,
         fire_history_dropout_prob: float = 0.0,
         new_fire_frac: float = 0.0,
@@ -867,6 +906,7 @@ class DualDataModule(pl.LightningDataModule):
             use_fuel_age=h.use_fuel_age,
             fuel_age_lookback=h.fuel_age_lookback,
             use_wind_dir=h.use_wind_dir,
+            use_ffdi=h.use_ffdi, use_fmc=h.use_fmc, fmc_store=h.fmc_store,
             augment=h.augment,
             fire_history_dropout_prob=h.fire_history_dropout_prob,
         ))
@@ -890,6 +930,7 @@ class DualDataModule(pl.LightningDataModule):
             use_fuel_age=h.use_fuel_age,
             fuel_age_lookback=h.fuel_age_lookback,
             use_wind_dir=h.use_wind_dir,
+            use_ffdi=h.use_ffdi, use_fmc=h.use_fmc, fmc_store=h.fmc_store,
             augment=False,   # val is always deterministic/unaugmented, regardless of h.augment
             fire_history_dropout_prob=0.0,  # val must see the real fire-history signal always
         ))

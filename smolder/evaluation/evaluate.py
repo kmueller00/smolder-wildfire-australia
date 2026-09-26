@@ -77,7 +77,10 @@ def main():
         use_elevation=os.environ.get("USE_ELEVATION", "0") == "1",
         use_slope_aspect=os.environ.get("USE_SLOPE_ASPECT", "0") == "1",
         use_fuel_age=os.environ.get("USE_FUEL_AGE", "0") == "1",
-        use_wind_dir=os.environ.get("USE_WIND_DIR", "0") == "1"))
+        use_wind_dir=os.environ.get("USE_WIND_DIR", "0") == "1",
+        use_ffdi=os.environ.get("USE_FFDI", "0") == "1",
+        use_fmc=os.environ.get("USE_FMC", "0") == "1",
+        fmc_store=os.environ.get("FMC_STORE", "fmc_weekly_ff.zarr")))
     print(f'[info] patch={PATCH} min_pos_pixels={MIN_POS} (density {100*MIN_POS/PATCH**2:.4f}%)', flush=True)
     rows=[]; ALL_P=[]; ALL_Y=[]
     for i in range(N_PATCH*3):
