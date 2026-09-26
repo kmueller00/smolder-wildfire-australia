@@ -107,17 +107,17 @@ percentile, with the top-1 % area outlined.
 
 ## What "new-fire lift" measures
 
-Whether a fire pixel counts as "new" depends on a distance threshold and on
-how much fire history is considered, and the resulting lift depends on both.
+Whether a fire pixel counts as "new" depends on how far it must be from
+earlier fire and how far back "earlier" reaches; the lift depends on both.
 
 ![new-fire distance dependence](figures/fig_newfire_distance_decay.png)
 
-With the headline definition (3 px, one history window) 61 % of fire
-pixels count as new and the lift is 11.6×. Requiring 10 px from any fire
-in the same window leaves 41 % of fire pixels at a lift of 2.2×.
-Extending the history to 30 windows (32 days) at 10 px leaves 19 % of
-fire pixels, and the lift falls to 0.14×, below random: fire that is
-far from anything that burned in the past month is not anticipated.
+With the headline definition (no fire within 3 px in the last 3 days)
+61 % of fire pixels count as new and the lift is 11.6×. Requiring no fire
+within 10 px in the last 3 days leaves 41 % of fire pixels at a lift of
+2.2×. Requiring no fire within 10 px in the last 32 days leaves 19 % of
+fire pixels, and the lift falls to 0.14×, below random: fire far from
+anything that burned in the past month is not anticipated.
 
 ## Limitations
 

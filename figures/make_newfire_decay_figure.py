@@ -14,7 +14,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 S = json.load(open(os.path.join(HERE, "..", "results", "newfire_sweep_2020.json")))
 RADII = np.array(S["radii_px"])
 lift = next(iter(S["lift"].values()))
-SHOW = ((1, "1 history window", ACCENT, "o-"), (30, "30 history windows", ACCENT2, "o--"))
+SHOW = ((1, "No fire nearby in the last 3 days", ACCENT, "o-"), (30, "No fire nearby in the last 32 days", ACCENT2, "o--"))
 
 fig = new_figure((12.6, 5.1))
 axA = fig.add_subplot(121)
@@ -47,8 +47,8 @@ for ax in (axA, axB):
 fig.suptitle("New-fire lift depends on how “new” is defined, 2020 hold-out year",
              fontsize=14, fontweight="bold", color=INK, y=1.03)
 fig.text(0.5, -0.05,
-         f"{S['n_patches']} fire-active patches. A history window is one 3-day block of VIIRS detections ending on the "
-         "issue day; 30 windows cover the preceding 32 days. Fire within the radius counts as known.",
+         f"{S['n_patches']} fire-active patches. A fire pixel counts as new if no VIIRS fire was detected within the "
+         "given distance during the stated period up to the issue day.",
          ha="center", fontsize=9, color=MUTED, style="italic", wrap=True)
 fig.tight_layout()
 fig.savefig(os.path.join(HERE, "fig_newfire_distance_decay.png"), dpi=300, bbox_inches="tight",
