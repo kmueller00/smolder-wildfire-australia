@@ -187,6 +187,33 @@ regions to check that the results hold across season and space.
 Reproduce with `python -m smolder.evaluation.explain_topk`, then
 `cd figures && python make_explain_figures.py --summarize explain_2020_pixels.csv.gz && python make_explain_figures.py`.
 
+## Why not train without fire history?
+
+If fire history decides the top 1 %, removing it might seem a way to force
+the model to predict genuinely new fires. This was tested and is not used:
+
+- **A model without any fire-history input** (trained on the same data and
+  recipe) lost almost all overall skill: validation AP 0.012 against 0.51 for
+  the model with fire history at the time. Being blind to fire, it was not
+  affected by the fire-history correction described below.
+- **Far from recent fire it was not better than the released model.** For
+  fire more than 10 km from any fire in the three history windows before the
+  issue day, it reached a lift of 0.6×; the released model reaches 1.0× on
+  the same definition, and 2.2× when only the last three days of fire are
+  considered.
+- **Combining the two did not help either.** Using the fire-history-free
+  model only where no fire had burned nearby, and the main model elsewhere,
+  never beat the main model alone at any mixing ratio.
+
+The reason is visible in the analysis above: the new fire that the model
+predicts well is mostly the spread front 1 to 5 km from existing fire, which
+needs fire history, while weather and fuel inputs each shift only 1 to 6 % of
+the ranking and carry little information about where an isolated ignition
+will occur. More promising routes for isolated fires are inputs that describe
+ignition rather than flammability, such as daily lightning strikes, or a
+coarser target such as fire anywhere in a 10 to 25 km cell, where the model
+already reaches a cell AUC-PR of 0.37.
+
 ## Limitations
 
 - **Skill depends on fire that is already burning.** Skill is concentrated
