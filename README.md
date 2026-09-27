@@ -157,9 +157,11 @@ anything that burned in the past month is not anticipated.
   alignment, road distance, population, a McArthur forest fire danger index
   from SILO reanalysis, and Sentinel-2 live fuel moisture aggregated to 1 km
   were each tested. None improved hold-out skill beyond evaluation noise, so
-  none is used. These tests were run before the fire-history correction
-  described below, while the model still had access to first-day detections.
-  They are being repeated with the corrected model. Likely
+  none is used. After the fire-history correction described below, two
+  groups were re-tested in full training runs: lightning, terrain, fuel age
+  and downwind alignment raised patch AUC-PR from 0.090 to 0.095 but left
+  new-fire lift unchanged (13.3× vs 13.6×) and lowered it far from recent
+  fire; the fire danger index with fuel moisture gave no gain at all. Likely
   reasons for a genuine plateau: sub-kilometre fuel continuity and ignition
   sources are averaged away at 1 km, and weather at 12 to 25 km resolution
   varies little between neighbouring pixels.
