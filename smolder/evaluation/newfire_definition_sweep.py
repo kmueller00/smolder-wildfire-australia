@@ -102,7 +102,7 @@ def main():
             use_wind_dir=os.environ.get("USE_WIND_DIR", "0") == "1",
             use_ffdi=os.environ.get("USE_FFDI", "0") == "1",
             use_fmc=os.environ.get("USE_FMC", "0") == "1",
-            fmc_store=os.environ.get("FMC_STORE", "fmc_weekly_ff.zarr") and not fh))
+            fmc_store=os.environ.get("FMC_STORE", "fmc_weekly_ff.zarr")))
 
     # NO_FIREHIST lists which members were trained without fire history
     # (colon-separated indices), so each gets the input layout it expects.

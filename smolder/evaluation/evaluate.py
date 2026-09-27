@@ -88,8 +88,8 @@ def main():
         b=ds[i]; land=b['mask'].numpy()>0.5
         truth=(b['y'][-1].numpy()>0)&land
         if truth.sum()<MIN_POS or land.mean()<0.5: continue
-        # newest fire-history channel of the last step (x_fast channel 7)
-        recent=b['x_fast'][-1,:,:,7].numpy()>0.5
+        # newest fire-history channel of the last step
+        recent=b['x_fast'][-1,:,:,ds.fire_hist_start_idx].numpy()>0.5
         known=ndimage.binary_dilation(recent,iterations=DILATE)
         new_fire=truth&~known
         with torch.no_grad():

@@ -50,7 +50,44 @@ The exact configuration is in [configs/smolder.env](configs/smolder.env).
 
 ![training convergence](figures/fig_convergence.png)
 
-## Results, 2020 hold-out year
+## National evaluation, 2020 hold-out year
+
+The model is run over the whole continent for every valid issue day of 2020
+(350 days, 6.9 M land pixels per day), as overlapping
+384 px tiles blended towards tile centres. Every land pixel is scored against
+every other, as in an operational national product.
+
+![national example](figures/fig_national_example.png)
+
+| Metric | Value |
+|---|---|
+| AUC-PR, pooled over all days and land pixels | **0.089** (base rate 0.032 %) |
+| ROC-AUC | 0.916 |
+| AUC-PR on 25 km cells (does a cell see fire) | 0.372 (base rate 3.4 %) |
+| Calibration error after isotonic fit on 2019 | 0.00012 |
+
+| Share of Australia flagged | Fire caught | Lift, all fire | New fire caught | Lift, new fire |
+|---|---|---|---|---|
+| 0.1 % | 28 % | 276× | 2 % | 22× |
+| 0.5 % | 43 % | 86× | 15 % | 30× |
+| 1 % | 50 % | 50× | 25 % | 25× |
+| 5 % | 68 % | 14× | 52 % | 10× |
+| 10 % | 74 % | 7× | 61 % | 6× |
+
+Values are means over days. Skill varies with season (AUC-PR DJF 0.139, JJA 0.078, MAM 0.034, SON 0.129) and
+climate (AUC-PR arid 0.056, temperate 0.093, tropical 0.102); it is lowest in autumn (MAM) and in the arid interior.
+
+![national skill](figures/fig_national_skill.png)
+
+![national annual maps](figures/fig_national_maps.png)
+
+Reproduce with `CALIB_YEAR=2019 python -m smolder.evaluation.evaluate_national`
+(about 3 hours on one A100).
+
+## Patch evaluation, 2020 hold-out year
+
+Skill inside fire-active 384 px windows, a complementary view that isolates
+how well fire pixels are ranked where fire occurs.
 
 | Metric | Value |
 |---|---|
@@ -186,7 +223,8 @@ pip install -e .
 
 export SMOLDER_DATA=/path/to/zarr/stores   # holds cube_2020_zenodo.zarr and cube_slow_8day.zarr
 
-python -m smolder.evaluation.evaluate                   # headline metrics (GPU recommended)
+python -m smolder.evaluation.evaluate_national          # national evaluation (GPU, about 3 h)
+python -m smolder.evaluation.evaluate                   # patch evaluation (GPU recommended)
 python -m smolder.evaluation.newfire_definition_sweep   # distance dependence of new-fire lift
 
 # training (needs the 2015-2019 cubes)
