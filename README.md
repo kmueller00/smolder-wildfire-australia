@@ -143,6 +143,50 @@ within 10 px in the last 3 days leaves 41 % of fire pixels at a lift of
 fire pixels, and the lift falls to 0.14×, below random: fire far from
 anything that burned in the past month is not anticipated.
 
+## What decides the top-1 % risk area
+
+To see why the model flags the pixels it does, each input group was shuffled
+across the land pixels of a patch (keeping every pixel's time series intact
+but breaking its link to location), and the share of the original top-1 %
+pixels that then left the top 1 % was measured. 1500 fire-active
+patches of 2020, split into 5 consecutive time blocks and 5 west-to-east
+regions to check that the results hold across season and space.
+
+![input importance](figures/fig_explain_importance.png)
+
+- **Fire history decides the selection.** Shuffling it displaces
+  94 % of the top-1 % pixels (91 to 97 % across time
+  blocks, 91 to 98 % across regions) and removes 95 % of
+  AUC-PR. Every other input displaces at most 6 %.
+- **Among the rest, land cover and climate zone matter most**, followed by
+  biomass and vapour pressure deficit. Vapour pressure deficit matters most
+  in shrubland, grassland and the arid zone; biomass in closed forest and the
+  temperate zone. Precipitation, soil moisture, leaf area index and land
+  surface temperature each shift 1 to 2 % of the selection.
+
+![conditions by class](figures/fig_explain_conditions.png)
+
+- **Flagged pixels sit next to recent fire.** Correctly flagged pixels that
+  burned lie a median of about 1 km from fire detected in the three days
+  before; false alarms about 2 to 3 km; missed fires 14 to 30 km.
+- **Within that, the fires that happen are drier.** In the temperate zone,
+  correctly flagged pixels had lower soil moisture (median 0.37 against about
+  0.5), higher vapour pressure deficit (2.0 against 1.5 kPa) and more biomass
+  than false alarms or other pixels; in the arid zone, lower soil moisture.
+
+![pre-fire trajectories](figures/fig_explain_prefire.png)
+
+- **What precedes fire, independently of the model:** pixels that burned in
+  closed forest dried out steadily over the 144 days before, ending well
+  below comparable pixels that did not burn, and vapour pressure deficit rose
+  over the last two weeks in forest and shrubland. Burned grassland and
+  shrubland carried more leaf area (fuel) than unburned ones throughout.
+  These signals are real but small next to the effect of fire already
+  burning nearby, which is why the model relies on fire history.
+
+Reproduce with `python -m smolder.evaluation.explain_topk`, then
+`cd figures && python make_explain_figures.py --summarize explain_2020_pixels.csv.gz && python make_explain_figures.py`.
+
 ## Limitations
 
 - **Skill depends on fire that is already burning.** Skill is concentrated
