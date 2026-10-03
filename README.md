@@ -234,7 +234,7 @@ already reaches a cell AUC-PR of 0.37.
   new-fire lift unchanged (13.3× vs 13.6×) and lowered it far from recent
   fire; the fire danger index with fuel moisture gave no gain at all. Likely
   reasons for a genuine plateau: sub-kilometre fuel continuity and ignition
-  sources are averaged away at 1 km, and weather at 12 to 25 km resolution
+  sources are averaged away at 1 km, and weather inputs at 4.4 to 25 km resolution
   varies little between neighbouring pixels.
 - **Labels are satellite detections.** VIIRS misses fires under cloud or
   canopy, small or short-lived fires, and fires between overpasses. Missed

@@ -24,7 +24,7 @@ SECTIONS = [
     ("Fast branch  (14 daily steps)", ACCENT2, [
         ("Vapour pressure deficit", "ERA5 (Hersbach et al. 2020), at Tmax", "0.25°, daily", "daily value"),
         ("Land surface temperature", "gap-filled MODIS (Zhang et al. 2022)", "1 km, daily", "daily value"),
-        ("10 m wind speed", "BARRA2 reanalysis", "about 12 km, daily", "daily value"),
+        ("10 m wind speed", "BARRA-C2 reanalysis", "4.4 km, daily", "daily value"),
         ("Fire history", "VIIRS 375 m (Schroeder et al. 2014)", "375 m, daily", "3 windows of 3 days up to each day"),
         ("Distance to recent fire", "derived from fire history", "0.01°", "exp(−d / 5 km), per time step"),
     ]),
