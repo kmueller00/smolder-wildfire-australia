@@ -160,6 +160,14 @@ class DualPatchConfig:
     # for fast step s at index s - 3, so it never includes fire after that
     # step's own issue day. Not a model input. None = not returned.
     past_fire_dist_store: Optional[str] = None
+    # Optional standardized VPD anomaly as one extra fast-branch channel, the
+    # LAST channel of x_fast: (VPD_t - mean) / max(sd, 0.01 kPa) for every fast
+    # day t, with the per-pixel climatology of climatology_2015_2018.zarr
+    # (2015-2018 only, +-15 days, anchors every 8 days, interpolated), from
+    # smolder.evaluation.anomaly_feature_diagnostic. Clipped to +-6.
+    use_vpd_anomaly: bool = field(
+        default_factory=lambda: os.environ.get("USE_VPD_ANOMALY", "0") == "1")
+    clim_store: str = "climatology_2015_2018.zarr"
 
 
 class DualWindowDataset(Dataset):
@@ -230,6 +238,12 @@ class DualWindowDataset(Dataset):
         if self.use_ffdi:
             for year in set(self.cube_year.values()):
                 self.ffdi_groups[year] = open_zarr_root(f"ffdi_{year}.zarr")
+        self.use_vpd_anomaly = bool(getattr(cfg, "use_vpd_anomaly", False))
+        if self.use_vpd_anomaly:
+            cg = open_zarr_root(getattr(cfg, "clim_store", "climatology_2015_2018.zarr"))
+            assert [int(y) for y in cg.attrs["years"]] == [2015, 2016, 2017, 2018], cg.attrs["years"]
+            self.clim_vpd = (cg["vpd_mean"], cg["vpd_std"])
+            self.clim_anchors = np.asarray(cg.attrs["anchors_doy"], np.float64)
         self.fmc_group = None
         if self.use_fmc:
             self.fmc_group = open_zarr_root(str(getattr(cfg, "fmc_store", "fmc_weekly_ff.zarr")))
@@ -525,6 +539,25 @@ class DualWindowDataset(Dataset):
         forecasts days t_end..t_end+2) and patch corner (y0, x0)."""
         return self._build_sample(int(t_end), int(y0), int(x0))
 
+    def _vpd_anomaly(self, vpd_raw: np.ndarray, t_end: int, y0: int, x0: int) -> np.ndarray:
+        """(T, H, W) standardized VPD anomaly of fast days t_end-T .. t_end-1."""
+        import datetime as _dt
+        sl = (slice(None), slice(y0, y0 + self.ph), slice(x0, x0 + self.pw))
+        mu = np.asarray(self.clim_vpd[0][sl], np.float32)
+        sd = np.asarray(self.clim_vpd[1][sl], np.float32)
+        a = np.r_[self.clim_anchors, 366.0]
+        out = np.empty(vpd_raw.shape, np.float32)
+        for j in range(vpd_raw.shape[0]):
+            g = t_end - vpd_raw.shape[0] + j + int(self.cfg.day_offset)
+            doy = min((_dt.date(2015, 1, 1) + _dt.timedelta(days=int(g))).timetuple().tm_yday, 365)
+            k0 = int(np.searchsorted(a, doy, side="right") - 1)
+            f = (doy - a[k0]) / (a[k0 + 1] - a[k0])
+            k1 = (k0 + 1) % len(self.clim_anchors)
+            m = mu[k0] * (1 - f) + mu[k1] * f
+            s = np.maximum(sd[k0] * (1 - f) + sd[k1] * f, 0.01)
+            out[j] = (vpd_raw[j] - m) / s
+        return np.clip(np.nan_to_num(out, nan=0.0, posinf=0.0, neginf=0.0), -6.0, 6.0)
+
     def _slow_bin_end(self, t_end: int) -> int:
         """Exclusive index of the newest slow bin used for a sample ending at
         t_end (issue day t_end - 1). Fixed: bins that end on or before the
@@ -593,6 +626,7 @@ class DualWindowDataset(Dataset):
         # ---- fast branch: daily ----
         x_fast = self._read_span(t_end, cfg.fast_days, self.read_fast_idx)
         x_fast = np.nan_to_num(x_fast, nan=0.0, posinf=0.0, neginf=0.0)
+        vpd_raw = x_fast[..., FAST_CHANNELS.index("VPD")].copy() if self.use_vpd_anomaly else None
         x_fast = (x_fast - self.fast_mean[None, None, None, :]) / self.fast_std[None, None, None, :]
 
         # ---- target: fast branch is daily, so y aligns with its axis ----
@@ -752,6 +786,9 @@ class DualWindowDataset(Dataset):
                 fm[j, :, :, 0], fm[j, :, :, 1] = cache[mi]
             x_fast = np.concatenate([x_fast, fm], axis=-1)
 
+        if self.use_vpd_anomaly:
+            x_fast = np.concatenate([x_fast, self._vpd_anomaly(vpd_raw, t_end, y0, x0)[..., None]], axis=-1)
+
         # Fire-history feature dropout (TRAIN only): blank fire_hist_t-3/4/5 +
         # fire_dist to 0 for this sample with probability fire_history_dropout_
         # prob, forcing the network to predict from weather/terrain alone when
@@ -893,6 +930,7 @@ class DualDataModule(pl.LightningDataModule):
         new_fire_frac: float = 0.0,
         min_new_fire_pixels: int = 1,
         past_fire_dist_store: Optional[str] = None,
+        use_vpd_anomaly: bool = False,
         min_pos_pixels: int = 20,   # scale with patch area to hold fire-DENSITY fixed
                                      # across patch-size experiments: 20/256^2 = 0.0305%
         train_seed: int = 123,      # override for multi-seed noise-floor checks;
@@ -948,6 +986,7 @@ class DualDataModule(pl.LightningDataModule):
             augment=h.augment,
             fire_history_dropout_prob=h.fire_history_dropout_prob,
             past_fire_dist_store=h.past_fire_dist_store,
+            use_vpd_anomaly=h.use_vpd_anomaly,
         ))
         self.val_ds = DualWindowDataset(DualPatchConfig(
             zarr_paths=tuple(h.val_paths), stats_path=h.stats_path,
@@ -971,6 +1010,7 @@ class DualDataModule(pl.LightningDataModule):
             use_wind_dir=h.use_wind_dir,
             use_ffdi=h.use_ffdi, use_fmc=h.use_fmc, fmc_store=h.fmc_store,
             augment=False,   # val is always deterministic/unaugmented, regardless of h.augment
+            use_vpd_anomaly=h.use_vpd_anomaly,
             fire_history_dropout_prob=0.0,  # val must see the real fire-history signal always
         ))
 

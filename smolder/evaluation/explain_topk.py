@@ -24,7 +24,9 @@ hold-out year, fixed seed) and the released model.
      miss         burned, not in the top 1 %
      background   neither (random land pixels)
 
-Outputs (working directory): explain_2020.json, explain_2020_pixels.csv.gz
+Outputs (working directory): explain_<year>.json, explain_<year>_pixels.csv.gz
+EVAL_YEAR (default 2020) selects the year; USE_VPD_ANOMALY=1 adds the VPD
+anomaly channel (last fast channel) as its own input group.
 
 Usage:
     SMOLDER_DATA=/path/to/cubes python -m smolder.evaluation.explain_topk
@@ -50,6 +52,8 @@ TOP = 0.01
 PER_CLASS = int(os.environ.get("PER_CLASS", 60))
 NEG_FRAC = 0.02
 SEED = 21
+EVAL_YEAR = int(os.environ.get("EVAL_YEAR", 2020))
+OFFSETS = {2019: 1461, 2020: 1826}
 
 CLIMATE = {**{k: "tropical" for k in (1, 2, 3)}, **{k: "arid" for k in (4, 5, 6, 7)},
            **{k: "temperate" for k in range(8, 30)}}
@@ -63,11 +67,11 @@ def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     rng = np.random.default_rng(SEED)
     model = ConvLSTMLitDual.load_from_checkpoint(CKPT, map_location=device).eval().to(device)
-    cube = daily_cube(2020)
+    cube = daily_cube(EVAL_YEAR)
     times = list(open_zarr_root(cube).attrs["time"])
     ds = DualWindowDataset(DualPatchConfig(
         zarr_paths=(cube,), stats_path="channel_stats_2015_2018.json",
-        slow_cube_path="cube_slow_8day.zarr", day_offset=1826, patch_size=PATCH,
+        slow_cube_path="cube_slow_8day.zarr", day_offset=OFFSETS[EVAL_YEAR], patch_size=PATCH,
         samples_per_epoch=N_PATCH * 3, seed=SEED, min_pos_pixels=45, pos_frac=1.0,
         deterministic=True, fire_history=True, fire_history_lags=(3, 4, 5),
         fire_history_distance=True))
@@ -87,6 +91,8 @@ def main():
         ("land cover", [], 0),
         ("climate zone", [], 1),
     ]
+    if ds.use_vpd_anomaly:                      # appended as the last fast channel
+        GROUPS.insert(6, ("VPD anomaly", [("f", [-1])], None))
     stats = json.loads(CHANNEL_STATS.read_text())
     mu, sd = np.asarray(stats["x_mean"]), np.asarray(stats["x_std"])
     sd = np.where(sd < 1e-6, 1.0, sd)
@@ -250,9 +256,9 @@ def main():
                             by_climate=[r[n]["by_climate"] for _, r in per],
                             by_landcover=[r[n]["by_landcover"] for _, r in per])
                     for n in names})
-    with open("explain_2020.json", "w") as fh:
+    with open(f"explain_{EVAL_YEAR}.json", "w") as fh:
         json.dump(out, fh, indent=1, default=float)
-    pd.DataFrame(rows).to_csv("explain_2020_pixels.csv.gz", index=False)
+    pd.DataFrame(rows).to_csv(f"explain_{EVAL_YEAR}_pixels.csv.gz", index=False)
     print(f"\nbase pooled AUC-PR {ap0:.4f} on {npat} patches")
     print(f"{'input group':26s} {'retention':>9s} {'time-fold sd':>12s} {'space-fold sd':>13s} {'AP drop':>8s}")
     for name in names:
@@ -260,7 +266,7 @@ def main():
         ft, fs = out["folds"]["time"]["groups"][name], out["folds"]["space"]["groups"][name]
         print(f"{name:26s} {g['retention']:9.3f} {np.std(ft['retention']):12.3f} {np.std(fs['retention']):13.3f} "
               f"{100*g['ap_drop']:7.1f}%   clim {g['by_climate']}")
-    print(f"wrote explain_2020.json and explain_2020_pixels.csv.gz ({len(rows)} pixels)")
+    print(f"wrote explain_{EVAL_YEAR}.json and explain_{EVAL_YEAR}_pixels.csv.gz ({len(rows)} pixels)")
 
 
 if __name__ == "__main__":

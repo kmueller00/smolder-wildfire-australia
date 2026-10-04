@@ -83,6 +83,29 @@ def test_past_fire_weight_off_is_identity_and_on_is_correct():
     assert not torch.equal(base, on)
 
 
+def test_vpd_anomaly_channel():
+    import datetime as dt
+    base = _ds()
+    ds = DualWindowDataset(DualPatchConfig(**{**base.cfg.__dict__, "use_vpd_anomaly": True}))
+    y0, x0, t_end = 1600, 2600, 200
+    b0, b1 = base.sample_at(t_end, y0, x0), ds.sample_at(t_end, y0, x0)
+    assert b1["x_fast"].shape[-1] == b0["x_fast"].shape[-1] + 1        # one extra channel, last
+    assert torch.equal(b1["x_fast"][..., :-1], b0["x_fast"])            # everything else unchanged
+    g = open_zarr_root("cube_daily_smgrid_2019.zarr")
+    clim = open_zarr_root("climatology_2015_2018.zarr")
+    a = np.r_[np.asarray(clim.attrs["anchors_doy"], float), 366.0]
+    T = b1["x_fast"].shape[0]
+    for j, (r, c) in ((T - 1, (10, 20)), (0, (100, 50))):
+        t = t_end - T + j                                               # local day of fast step j
+        vpd = float(g["X"][t, y0 + r, x0 + c, 2])
+        doy = (dt.date(2019, 1, 1) + dt.timedelta(days=t)).timetuple().tm_yday
+        k0 = int(np.searchsorted(a, doy, side="right") - 1); f = (doy - a[k0]) / (a[k0 + 1] - a[k0])
+        k1 = (k0 + 1) % 46
+        mu = clim["vpd_mean"][:, y0 + r, x0 + c].astype(np.float32); sd = clim["vpd_std"][:, y0 + r, x0 + c].astype(np.float32)
+        ref = (vpd - (mu[k0] * (1 - f) + mu[k1] * f)) / max(sd[k0] * (1 - f) + sd[k1] * f, 0.01)
+        assert abs(float(b1["x_fast"][j, r, c, -1]) - np.clip(ref, -6, 6)) < 1e-4, (j, ref)
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):
