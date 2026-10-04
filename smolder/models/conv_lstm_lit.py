@@ -154,6 +154,14 @@ class ConvLSTMLit(pl.LightningModule):
         ohem_frac: float = 0.0,
         ohem_min_negatives: int = 256,
         ohem_rescale_negatives: bool = True,
+
+        # ---- weight on fire far from PAST fire ----
+        # Fire pixels get w = 1 + a * min(d / scale, 1), d = distance (px, about
+        # km) to the nearest fire of the last 32 days (batch["past_dist"]),
+        # multiplied with every other weight. Background keeps weight 1.
+        # a = 0 (default) builds no weight at all: the loss is unchanged.
+        past_fire_weight_a: float = 0.0,
+        past_fire_weight_scale_px: float = 10.0,
     ):
         super().__init__()
 
@@ -216,6 +224,8 @@ class ConvLSTMLit(pl.LightningModule):
 
         self.isolation_gamma = float(isolation_gamma)
         self.isolation_kernel = int(isolation_kernel)
+        self.past_fire_weight_a = float(past_fire_weight_a)
+        self.past_fire_weight_scale_px = float(past_fire_weight_scale_px)
 
         self.ohem_frac = float(ohem_frac)
         self.ohem_min_negatives = int(ohem_min_negatives)
@@ -636,6 +646,16 @@ class ConvLSTMLit(pl.LightningModule):
         weight = torch.where(yf > 0.5, iso, torch.ones_like(iso))
         return weight.detach()
 
+    def _past_fire_weight(self, y: torch.Tensor, dist: Optional[torch.Tensor]) -> Optional[torch.Tensor]:
+        """w = 1 + a * min(d / scale, 1) on fire pixels, 1 elsewhere; None if
+        a <= 0 or no distance is given (the loss is then unchanged)."""
+        a = float(getattr(self, "past_fire_weight_a", 0.0))
+        if a <= 0.0 or dist is None:
+            return None
+        far = torch.clamp(dist.to(torch.float32) / float(self.past_fire_weight_scale_px), max=1.0)
+        w = 1.0 + a * far
+        return torch.where(y.to(torch.float32) > 0.5, w, torch.ones_like(w)).detach()
+
     @staticmethod
     def _mask_select(t: Optional[torch.Tensor], mask: Optional[torch.Tensor]) -> Optional[torch.Tensor]:
         if t is None or mask is None:
@@ -660,6 +680,7 @@ class ConvLSTMLit(pl.LightningModule):
         logits: torch.Tensor,
         y: torch.Tensor,
         mask: Optional[torch.Tensor] = None,
+        extra_weight: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
         comps: Dict[str, torch.Tensor] = {}
 
@@ -668,7 +689,11 @@ class ConvLSTMLit(pl.LightningModule):
         # Isolation weight computed on the FULL (pre-mask, pre-soft-label) target
         # so local density reflects real neighbouring fire, then flattened with
         # the same mask as everything else. None when isolation_gamma<=0.
-        weight_m = self._mask_select(self._isolation_weight(y), mask)
+        # extra_weight (same shape as y, e.g. _past_fire_weight) multiplies in.
+        weight = self._isolation_weight(y)
+        if extra_weight is not None:
+            weight = extra_weight if weight is None else weight * extra_weight
+        weight_m = self._mask_select(weight, mask)
 
         if logits_m.numel() == 0:
             # No pixels for this LC class in the batch; return a graph-connected zero

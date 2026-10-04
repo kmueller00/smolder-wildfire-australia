@@ -75,13 +75,21 @@ def main():
     isolation_gamma = float(os.environ.get("ISOLATION_GAMMA", 0.0))
     isolation_kernel = int(os.environ.get("ISOLATION_KERNEL", 9))
 
+    # ---- weight on fire far from past fire (0.0 = disabled, old behaviour) ----
+    past_fire_weight_a = float(os.environ.get("PAST_FIRE_WEIGHT_A", 0.0))
+    past_fire_weight_scale_px = float(os.environ.get("PAST_FIRE_WEIGHT_SCALE_PX", 10.0))
+    past_fire_dist_store = os.environ.get("PAST_FIRE_DIST_STORE", "fire_dist30_continental.zarr")
+    if os.environ.get("SLOW_WINDOW_LEGACY", "0") == "1":
+        print("[warn] SLOW_WINDOW_LEGACY=1: slow bins reach past the issue day (leak)")
+
     print(f"[info] SMOLDER training: slow {SLOW_CHANNELS} {slow_days}d/{SLOW_BIN}d-bins, "
           f"fast {FAST_CHANNELS} {fast_days}d | pos_weight={pos_weight} "
           f"samples_per_epoch={samples_per_epoch} max_epochs={max_epochs} "
           f"patch_size={patch_size} min_pos_pixels={min_pos_pixels} "
           f"(density {100*min_pos_pixels/patch_size**2:.4f}%) | "
           f"pos_weight_anneal={pos_weight_start}->{pos_weight_end} over {pw_anneal_epochs}ep | "
-          f"isolation_gamma={isolation_gamma} kernel={isolation_kernel}")
+          f"isolation_gamma={isolation_gamma} kernel={isolation_kernel} | "
+          f"past_fire_weight_a={past_fire_weight_a} scale={past_fire_weight_scale_px}px")
 
     # Pre-binned slow cube (build_slow_cube.py). Without it the datamodule falls
     # back to aggregating 144 raw days per sample: correct, but 22x slower
@@ -127,6 +135,7 @@ def main():
         fire_history_dropout_prob=float(os.environ.get("FIRE_HISTORY_DROPOUT_PROB", 0.0)),
         new_fire_frac=float(os.environ.get("NEW_FIRE_FRAC", 0.0)),
         min_new_fire_pixels=int(os.environ.get("MIN_NEW_FIRE_PIXELS", 1)),
+        past_fire_dist_store=past_fire_dist_store if past_fire_weight_a > 0 else None,
     )
 
     dm.setup("fit")
@@ -184,6 +193,8 @@ def main():
         pos_weight_anneal_epochs=pw_anneal_epochs,
         isolation_gamma=isolation_gamma,
         isolation_kernel=isolation_kernel,
+        past_fire_weight_a=past_fire_weight_a,
+        past_fire_weight_scale_px=past_fire_weight_scale_px,
         # OHEM: keep all positives + only the hardest OHEM_FRAC of negatives.
         # 0.0 (default) = disabled, byte-identical to the pre-OHEM loss.
         ohem_frac=float(os.environ.get("OHEM_FRAC", 0.0)),

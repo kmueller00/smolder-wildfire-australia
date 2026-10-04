@@ -127,14 +127,18 @@ class ConvLSTMLitDual(ConvLSTMLitV2):
         mask = self._get_lc_mask(x_cat, y_last.shape[-2], y_last.shape[-1],
                                  land_mask=batch.get("mask"))
 
-        loss_main, comps = self._compute_loss(logits_seq[:, -1], y_last, mask=mask)
+        pdist = batch.get("past_dist")              # (B, T, H, W) or None
+        loss_main, comps = self._compute_loss(
+            logits_seq[:, -1], y_last, mask=mask,
+            extra_weight=self._past_fire_weight(y_last, pdist[:, -1] if pdist is not None else None))
 
         T = logits_seq.shape[1]
         if self.aux_loss_weight > 0 and T > 1:
             la = logits_seq[:, :-1].reshape(-1, *logits_seq.shape[-2:])
             ya = y_seq[:, :-1].reshape(-1, *y_seq.shape[-2:])
             ma = mask.repeat_interleave(T - 1, dim=0) if mask is not None else None
-            loss_aux, _ = self._compute_loss(la, ya, mask=ma)
+            da = pdist[:, :-1].reshape(-1, *pdist.shape[-2:]) if pdist is not None else None
+            loss_aux, _ = self._compute_loss(la, ya, mask=ma, extra_weight=self._past_fire_weight(ya, da))
             loss = loss_main + self.aux_loss_weight * loss_aux
             self.log("train_loss_aux", loss_aux.detach(), on_step=False, on_epoch=True)
         else:
