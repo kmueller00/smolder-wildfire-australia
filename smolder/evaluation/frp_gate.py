@@ -116,6 +116,17 @@ if os.path.exists(AGE_STORE):
     PAIRS += [("C", "CA"), ("S", "SA")]
 if os.path.exists(PM_STORE):
     ALL = ALL[:-1] + PM + ["smolder_logit"]
+# AGE_CAPS="365,730,1095,1460,0": compare fuel-age caps only (0 = no cap: days
+# since the last fire back to 2015-01-01). Replaces the model set with S and
+# S + capped fuel age per cap.
+AGE_CAPS = [int(c) for c in os.environ.get("AGE_CAPS", "").split(",") if c.strip()]
+if AGE_CAPS:
+    MODELS = {"S": BINARY + SL}
+    PAIRS = []
+    for c in AGE_CAPS:
+        name = f"SA{c}" if c else "SAnocap"
+        MODELS[name] = BINARY + ["fuel_age_p"] + SL
+        PAIRS.append(("S", name))
     MODELS["SPM"] = BINARY + TERRAIN + PM + SL
     PAIRS += [("S", "SPM"), ("SW", "SPM")]
 AUX = os.environ.get("AUX", "/home/saturn/gwgi/gwgi107h/wildfire_data/firecastnet/aux_rasters")
@@ -280,6 +291,17 @@ def main():
         if "smolder_logit" in feats and not SCORES:
             continue
         cols = [ALL.index(f) for f in feats]
+        if name.startswith("SA") and AGE_CAPS:                     # same feature, capped per model
+            cap = 0 if name == "SAnocap" else int(name[2:])
+            X = S["X"][:, cols].copy()
+            ia = feats.index("fuel_age_p")
+            if cap:
+                X[:, ia] = np.minimum(X[:, ia], cap)
+            clf = HistGradientBoostingClassifier(max_iter=300, learning_rate=0.1, random_state=SEED)
+            clf.fit(X[fit], S["y"][fit], sample_weight=S["w"][fit])
+            preds[name] = clf.predict_proba(X)[:, 1]
+            print(f"  fitted {name} ({time.time() - t0:.0f} s)", flush=True)
+            continue
         clf = HistGradientBoostingClassifier(max_iter=300, learning_rate=0.1, random_state=SEED)
         clf.fit(S["X"][fit][:, cols], S["y"][fit], sample_weight=S["w"][fit])
         preds[name] = clf.predict_proba(S["X"][:, cols])[:, 1]
