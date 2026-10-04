@@ -264,6 +264,7 @@ def main():
     resume_ckpt = os.environ.get("RESUME_CKPT", "").strip() or None
     if resume_ckpt:
         print(f"[info] resuming from checkpoint: {resume_ckpt}")
+    model.maybe_compile()                          # COMPILE=1: torch.compile (see ConvLSTMLitDual.maybe_compile)
     trainer.fit(model, dm, ckpt_path=resume_ckpt)
 
     trainer.save_checkpoint(str(run_dir / "final.ckpt"))

@@ -67,7 +67,7 @@ def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     rng = np.random.default_rng(SEED)
     check_checkpoint_inputs(CKPT)
-    model = ConvLSTMLitDual.load_from_checkpoint(CKPT, map_location=device).eval().to(device)
+    model = ConvLSTMLitDual.load_from_checkpoint(CKPT, map_location=device).eval().to(device).maybe_compile()
     cube = daily_cube(EVAL_YEAR)
     times = list(open_zarr_root(cube).attrs["time"])
     ds = DualWindowDataset(DualPatchConfig(
