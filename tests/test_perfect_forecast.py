@@ -106,6 +106,30 @@ def test_perfect_forecast_no_fire_and_exact_days():
         assert np.array_equal(b1["y"][j].numpy() > 0, ref_y > 0)
 
 
+def test_barra_vpd_anomaly_and_forecast_vpd():
+    """With vpd_source barra, the anomaly uses BARRA VPD and its own 2015-2018
+    climatology, and the perfect-forecast VPD is BARRA's."""
+    ds = _ds(vpd_source="barra", use_vpd_anomaly=True, perfect_forecast=True)
+    b = ds.sample_at(T_END, Y0, X0)
+    T = b["x_fast"].shape[0]
+    z = open_zarr_root("barra_c2_daily.zarr")
+    a = np.r_[np.asarray(dict(z.attrs["vpd_climatology"])["anchors_doy"], float), 366.0]
+    mu, sd = ds._barra_static("vpd_clim_mean", Y0, X0), ds._barra_static("vpd_clim_std", Y0, X0)
+    import datetime as dt
+    for j in (0, T - 1):
+        t = T_END - T + j
+        vpd = ds._barra_patch("vpd", [t + OFF], Y0, X0)[0]
+        doy = (dt.date(2019, 1, 1) + dt.timedelta(days=t)).timetuple().tm_yday
+        k0 = int(np.searchsorted(a, doy, side="right") - 1); f = (doy - a[k0]) / (a[k0 + 1] - a[k0])
+        k1 = (k0 + 1) % 46
+        ref = (vpd - (mu[k0] * (1 - f) + mu[k1] * f)) / np.maximum(sd[k0] * (1 - f) + sd[k1] * f, 0.01)
+        assert np.allclose(b["x_fast"][j, ..., -6].numpy(), np.clip(ref, -6, 6), atol=1e-4)   # anomaly before PF
+        s_j = T_END - T + j
+        fut = ds._barra_patch("vpd", [s_j + 1 + OFF, s_j + 2 + OFF, s_j + 3 + OFF], Y0, X0).max(0)
+        m_, s_ = ds.barra_stats["vpd"]
+        assert np.allclose(b["x_fast"][j, ..., -2].numpy(), (fut - m_) / s_, atol=1e-4)
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

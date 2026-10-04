@@ -1,0 +1,160 @@
+{
+ "eval_year": 2019,
+ "n_fire": 1345605,
+ "n_nofire": 399802,
+ "tables": {
+  "a_all": {
+   "overall": {
+    "vpd_barra": {
+     "auc": 0.5359114922940805,
+     "auc_oriented": 0.5359114922940805,
+     "n_fire": 1345605
+    },
+    "z_vpd_barra": {
+     "auc": 0.5921485562720792,
+     "auc_oriented": 0.5921485562720792,
+     "n_fire": 1345605
+    }
+   },
+   "by_landcover": {
+    "grassland": {
+     "vpd_barra": {
+      "auc": 0.5408542856550796,
+      "auc_oriented": 0.5408542856550796,
+      "n_fire": 205350
+     },
+     "z_vpd_barra": {
+      "auc": 0.578275967497523,
+      "auc_oriented": 0.578275967497523,
+      "n_fire": 205350
+     }
+    },
+    "shrubland": {
+     "vpd_barra": {
+      "auc": 0.685008920578396,
+      "auc_oriented": 0.685008920578396,
+      "n_fire": 96957
+     },
+     "z_vpd_barra": {
+      "auc": 0.6282082159989437,
+      "auc_oriented": 0.6282082159989437,
+      "n_fire": 96957
+     }
+    },
+    "open forest": {
+     "vpd_barra": {
+      "auc": 0.6197658112539651,
+      "auc_oriented": 0.6197658112539651,
+      "n_fire": 379253
+     },
+     "z_vpd_barra": {
+      "auc": 0.5861912557278869,
+      "auc_oriented": 0.5861912557278869,
+      "n_fire": 379253
+     }
+    },
+    "closed forest": {
+     "vpd_barra": {
+      "auc": 0.6886724224500234,
+      "auc_oriented": 0.6886724224500234,
+      "n_fire": 610344
+     },
+     "z_vpd_barra": {
+      "auc": 0.6440667012139221,
+      "auc_oriented": 0.6440667012139221,
+      "n_fire": 610344
+     }
+    },
+    "cropland": {
+     "vpd_barra": {
+      "auc": 0.49893451698587643,
+      "auc_oriented": 0.5010654830141236,
+      "n_fire": 45889
+     },
+     "z_vpd_barra": {
+      "auc": 0.4974857871919608,
+      "auc_oriented": 0.5025142128080392,
+      "n_fire": 45889
+     }
+    }
+   }
+  },
+  "b_far_10km": {
+   "overall": {
+    "vpd_barra": {
+     "auc": 0.5821205576207724,
+     "auc_oriented": 0.5821205576207724,
+     "n_fire": 238950
+    },
+    "z_vpd_barra": {
+     "auc": 0.6216358004204654,
+     "auc_oriented": 0.6216358004204654,
+     "n_fire": 238950
+    }
+   },
+   "by_landcover": {
+    "grassland": {
+     "vpd_barra": {
+      "auc": 0.60660765449084,
+      "auc_oriented": 0.60660765449084,
+      "n_fire": 67116
+     },
+     "z_vpd_barra": {
+      "auc": 0.6102106812900316,
+      "auc_oriented": 0.6102106812900316,
+      "n_fire": 67116
+     }
+    },
+    "shrubland": {
+     "vpd_barra": {
+      "auc": 0.7031235464775779,
+      "auc_oriented": 0.7031235464775779,
+      "n_fire": 32150
+     },
+     "z_vpd_barra": {
+      "auc": 0.6420837867473139,
+      "auc_oriented": 0.6420837867473139,
+      "n_fire": 32150
+     }
+    },
+    "open forest": {
+     "vpd_barra": {
+      "auc": 0.6283494241170902,
+      "auc_oriented": 0.6283494241170902,
+      "n_fire": 62714
+     },
+     "z_vpd_barra": {
+      "auc": 0.607597618467284,
+      "auc_oriented": 0.607597618467284,
+      "n_fire": 62714
+     }
+    },
+    "closed forest": {
+     "vpd_barra": {
+      "auc": 0.6871421730331848,
+      "auc_oriented": 0.6871421730331848,
+      "n_fire": 67134
+     },
+     "z_vpd_barra": {
+      "auc": 0.6928902133936412,
+      "auc_oriented": 0.6928902133936412,
+      "n_fire": 67134
+     }
+    },
+    "cropland": {
+     "vpd_barra": {
+      "auc": 0.48429579764286507,
+      "auc_oriented": 0.515704202357135,
+      "n_fire": 8495
+     },
+     "z_vpd_barra": {
+      "auc": 0.47342902757012867,
+      "auc_oriented": 0.5265709724298713,
+      "n_fire": 8495
+     }
+    }
+   }
+  }
+ },
+ "marked": true
+}

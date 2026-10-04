@@ -176,7 +176,10 @@ class DualPatchConfig:
     #   perfect_forecast: 5 extra fast-branch channels (appended last) with the
     #     weather of the three days AFTER each fast step's issue day s:
     #     max sfcWindmax, mean uas, mean vas (BARRA-C2), max VPD (cube) and
-    #     precipitation sum (cube) over s+1..s+3. This uses future weather on
+    #     precipitation sum (cube) over s+1..s+3; with vpd_source "barra" the
+    #     VPD of both the perfect_forecast channels and the VPD anomaly comes
+    #     from BARRA-C2 (anomaly against vpd_clim_* of the BARRA store). This
+    #     uses future weather on
     #     purpose: an upper bound for perfect weather forecasts, never an
     #     operational model. No fire information is read for these channels.
     vpd_source: str = field(default_factory=lambda: os.environ.get("VPD_SOURCE", "montes"))
@@ -274,7 +277,13 @@ class DualWindowDataset(Dataset):
                     chy = {alias[n]: i for i, n in enumerate(names)} if names else CH
                     self.x_by_year[y] = (gy["X"], chy)
         self.use_vpd_anomaly = bool(getattr(cfg, "use_vpd_anomaly", False))
-        if self.use_vpd_anomaly:
+        if self.use_vpd_anomaly and self.vpd_source == "barra":
+            # anomaly of BARRA-C2 VPD against its own 2015-2018 climatology (build_barra_climatology)
+            info = dict(self.barra.attrs["vpd_climatology"])
+            assert [int(y) for y in info["years"]] == [2015, 2016, 2017, 2018], info["years"]
+            self.clim_vpd = (self.barra["vpd_clim_mean"], self.barra["vpd_clim_std"])
+            self.clim_anchors = np.asarray(info["anchors_doy"], np.float64)
+        elif self.use_vpd_anomaly:
             cg = open_zarr_root(getattr(cfg, "clim_store", "climatology_2015_2018.zarr"))
             assert [int(y) for y in cg.attrs["years"]] == [2015, 2016, 2017, 2018], cg.attrs["years"]
             self.clim_vpd = (cg["vpd_mean"], cg["vpd_std"])
@@ -595,6 +604,18 @@ class DualWindowDataset(Dataset):
         FI, FJ = np.meshgrid(fi - r0, fj - k0, indexing="ij")
         return np.stack([map_coordinates(w, [FI, FJ], order=1, mode="nearest") for w in win])
 
+    def _barra_static(self, name: str, y0: int, x0: int) -> np.ndarray:
+        """A (k, lat, lon) array of the BARRA store, bilinearly interpolated to the patch."""
+        from scipy.ndimage import map_coordinates
+        c0, a, f0, e = self._GT
+        fi = (f0 + (np.arange(y0, y0 + self.ph) + 0.5) * e - self.barra_lat[0]) / (self.barra_lat[1] - self.barra_lat[0])
+        fj = (c0 + (np.arange(x0, x0 + self.pw) + 0.5) * a - self.barra_lon[0]) / (self.barra_lon[1] - self.barra_lon[0])
+        r0, r1 = int(np.floor(fi.min())), int(np.ceil(fi.max())) + 1
+        k0, k1 = int(np.floor(fj.min())), int(np.ceil(fj.max())) + 1
+        win = np.asarray(self.barra[name][:, r0:r1 + 1, k0:k1 + 1], np.float32)
+        FI, FJ = np.meshgrid(fi - r0, fj - k0, indexing="ij")
+        return np.stack([map_coordinates(w, [FI, FJ], order=1, mode="nearest") for w in win])
+
     def _cube_days(self, ch: str, gdays, y0: int, x0: int) -> np.ndarray:
         """Cube channel `ch` (name, raw units) for global days, any year; zeros where no cube."""
         import datetime as _dt
@@ -617,7 +638,10 @@ class DualWindowDataset(Dataset):
         wmax = np.nan_to_num(self._barra_patch("sfcWindmax", gdays, y0, x0))
         u = np.nan_to_num(self._barra_patch("uas", gdays, y0, x0))
         v = np.nan_to_num(self._barra_patch("vas", gdays, y0, x0))
-        vpd = self._cube_days("VPD", gdays, y0, x0)
+        if self.vpd_source == "barra":
+            vpd = np.nan_to_num(self._barra_patch("vpd", gdays, y0, x0))
+        else:
+            vpd = self._cube_days("VPD", gdays, y0, x0)
         ppt = self._cube_days("PPT", gdays, y0, x0)
         iv, ip = CH["VPD"], CH["PPT"]
         out = np.empty((T, self.ph, self.pw, 5), np.float32)
@@ -626,7 +650,10 @@ class DualWindowDataset(Dataset):
             out[j, ..., 0] = (wmax[w].max(0) - st["sfcWindmax"][0]) / st["sfcWindmax"][1]
             out[j, ..., 1] = (u[w].mean(0) - st["uas"][0]) / st["uas"][1]
             out[j, ..., 2] = (v[w].mean(0) - st["vas"][0]) / st["vas"][1]
-            out[j, ..., 3] = (vpd[w].max(0) - self.x_mean_all[iv]) / self.x_std_all[iv]
+            if self.vpd_source == "barra":
+                out[j, ..., 3] = (vpd[w].max(0) - st["vpd"][0]) / st["vpd"][1]
+            else:
+                out[j, ..., 3] = (vpd[w].max(0) - self.x_mean_all[iv]) / self.x_std_all[iv]
             out[j, ..., 4] = (ppt[w].sum(0) - 3 * self.x_mean_all[ip]) / (np.sqrt(3) * self.x_std_all[ip])
         return out
 
@@ -634,8 +661,11 @@ class DualWindowDataset(Dataset):
         """(T, H, W) standardized VPD anomaly of fast days t_end-T .. t_end-1."""
         import datetime as _dt
         sl = (slice(None), slice(y0, y0 + self.ph), slice(x0, x0 + self.pw))
-        mu = np.asarray(self.clim_vpd[0][sl], np.float32)
-        sd = np.asarray(self.clim_vpd[1][sl], np.float32)
+        if self.vpd_source == "barra":                           # native grid -> patch
+            mu, sd = self._barra_static("vpd_clim_mean", y0, x0), self._barra_static("vpd_clim_std", y0, x0)
+        else:
+            mu = np.asarray(self.clim_vpd[0][sl], np.float32)
+            sd = np.asarray(self.clim_vpd[1][sl], np.float32)
         a = np.r_[self.clim_anchors, 366.0]
         out = np.empty(vpd_raw.shape, np.float32)
         for j in range(vpd_raw.shape[0]):
@@ -724,6 +754,8 @@ class DualWindowDataset(Dataset):
             bv = self._barra_patch("vpd", range(g0, g0 + self.t_fast), y0, x0)
             x_fast[..., iv] = (np.nan_to_num(bv) - self.barra_stats["vpd"][0]) / self.barra_stats["vpd"][1] \
                 * self.fast_std[iv] + self.fast_mean[iv]          # undone by the normalization below
+            if self.use_vpd_anomaly:
+                vpd_raw = np.nan_to_num(bv)
         x_fast = (x_fast - self.fast_mean[None, None, None, :]) / self.fast_std[None, None, None, :]
 
         # ---- target: fast branch is daily, so y aligns with its axis ----
