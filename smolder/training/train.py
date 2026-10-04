@@ -137,6 +137,8 @@ def main():
         min_new_fire_pixels=int(os.environ.get("MIN_NEW_FIRE_PIXELS", 1)),
         past_fire_dist_store=past_fire_dist_store if past_fire_weight_a > 0 else None,
         use_vpd_anomaly=os.environ.get("USE_VPD_ANOMALY", "0") == "1",
+        vpd_source=os.environ.get("VPD_SOURCE", "montes"),
+        perfect_forecast=os.environ.get("PERFECT_FORECAST", "0") == "1",
     )
 
     dm.setup("fit")

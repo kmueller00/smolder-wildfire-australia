@@ -27,7 +27,7 @@ import torch
 from torch.utils.data import DataLoader, Dataset
 import lightning.pytorch as pl
 
-from smolder.data.io import data_dir, open_zarr_root, resolve_stats
+from smolder.data.io import daily_cube, data_dir, open_zarr_root, resolve, resolve_stats
 
 # Channel order of the 7-channel training cubes and of channel_stats_2015_2018.json:
 # [sm, wind, vpd, precip, lst_day, ndvi, lai]. Cubes that carry a `channels`
@@ -168,6 +168,21 @@ class DualPatchConfig:
     use_vpd_anomaly: bool = field(
         default_factory=lambda: os.environ.get("USE_VPD_ANOMALY", "0") == "1")
     clim_store: str = "climatology_2015_2018.zarr"
+    # BARRA-C2 (4.4 km) daily fields from smolder.data.build_barra_c2, read on
+    # their native grid and interpolated bilinearly to the patch.
+    #   vpd_source "barra": the fast-branch VPD channel is BARRA-C2 VPD at
+    #     tasmax instead of the 31 km ERA5-based product (normalized with the
+    #     2015-2018 statistics stored in the BARRA store).
+    #   perfect_forecast: 5 extra fast-branch channels (appended last) with the
+    #     weather of the three days AFTER each fast step's issue day s:
+    #     max sfcWindmax, mean uas, mean vas (BARRA-C2), max VPD (cube) and
+    #     precipitation sum (cube) over s+1..s+3. This uses future weather on
+    #     purpose: an upper bound for perfect weather forecasts, never an
+    #     operational model. No fire information is read for these channels.
+    vpd_source: str = field(default_factory=lambda: os.environ.get("VPD_SOURCE", "montes"))
+    perfect_forecast: bool = field(
+        default_factory=lambda: os.environ.get("PERFECT_FORECAST", "0") == "1")
+    barra_store: str = "barra_c2_daily.zarr"
 
 
 class DualWindowDataset(Dataset):
@@ -238,6 +253,26 @@ class DualWindowDataset(Dataset):
         if self.use_ffdi:
             for year in set(self.cube_year.values()):
                 self.ffdi_groups[year] = open_zarr_root(f"ffdi_{year}.zarr")
+        self.vpd_source = str(getattr(cfg, "vpd_source", "montes"))
+        self.perfect_forecast = bool(getattr(cfg, "perfect_forecast", False))
+        assert self.vpd_source in ("montes", "barra"), self.vpd_source
+        if self.vpd_source == "barra" or self.perfect_forecast:
+            self.barra = open_zarr_root(getattr(cfg, "barra_store", "barra_c2_daily.zarr"))
+            self.barra_lat = np.asarray(self.barra["lat"][...])
+            self.barra_lon = np.asarray(self.barra["lon"][...])
+            self.barra_stats = dict(self.barra.attrs["stats_2015_2018"])
+            if self.perfect_forecast and getattr(cfg, "augment", False):
+                raise ValueError("perfect_forecast carries wind u/v, which flips/rotations do not correct")
+        if self.perfect_forecast:
+            alias = {"sm": "SM", "wind": "WIND", "vpd": "VPD", "precip": "PPT",
+                     "lst_day": "LST", "ndvi": "NDVI", "lai": "LAI"}
+            self.x_by_year = {}
+            for y in range(2015, 2021):
+                if resolve(daily_cube(y)).exists():
+                    gy = open_zarr_root(daily_cube(y))
+                    names = gy.attrs.get("channels")
+                    chy = {alias[n]: i for i, n in enumerate(names)} if names else CH
+                    self.x_by_year[y] = (gy["X"], chy)
         self.use_vpd_anomaly = bool(getattr(cfg, "use_vpd_anomaly", False))
         if self.use_vpd_anomaly:
             cg = open_zarr_root(getattr(cfg, "clim_store", "climatology_2015_2018.zarr"))
@@ -258,6 +293,7 @@ class DualWindowDataset(Dataset):
         self.slow_idx = [CH[c] for c in SLOW_CHANNELS]
         self.fast_idx = [CH[c] for c in FAST_CHANNELS]
         self.slow_mean, self.slow_std = x_mean[self.slow_idx], x_std[self.slow_idx]
+        self.x_mean_all, self.x_std_all = x_mean, x_std
         self.fast_mean, self.fast_std = x_mean[self.fast_idx], x_std[self.fast_idx]
         # Positions to READ from the cube's X array. Identical to the stats
         # positions for 7-channel cubes; looked up by name when the cube says
@@ -539,6 +575,61 @@ class DualWindowDataset(Dataset):
         forecasts days t_end..t_end+2) and patch corner (y0, x0)."""
         return self._build_sample(int(t_end), int(y0), int(x0))
 
+    # exact model-grid geotransform (label rasters; pixel size is not exactly 0.01 deg)
+    _GT = (112.904998779, 0.009997566018978103, -9.005000113999998, -0.009997121616580312)
+
+    def _barra_patch(self, var: str, gdays, y0: int, x0: int) -> np.ndarray:
+        """BARRA-C2 `var` for global days `gdays`, bilinearly interpolated to the
+        patch, (len(gdays), H, W) float32."""
+        from scipy.ndimage import map_coordinates
+        c0, a, f0, e = self._GT
+        lat = f0 + (np.arange(y0, y0 + self.ph) + 0.5) * e
+        lon = c0 + (np.arange(x0, x0 + self.pw) + 0.5) * a
+        fi = (lat - self.barra_lat[0]) / (self.barra_lat[1] - self.barra_lat[0])
+        fj = (lon - self.barra_lon[0]) / (self.barra_lon[1] - self.barra_lon[0])
+        r0, r1 = int(np.floor(fi.min())), int(np.ceil(fi.max())) + 1
+        k0, k1 = int(np.floor(fj.min())), int(np.ceil(fj.max())) + 1
+        gdays = list(gdays)
+        win = np.asarray(self.barra[var][gdays[0]:gdays[-1] + 1, r0:r1 + 1, k0:k1 + 1], np.float32)
+        win = win[[g - gdays[0] for g in gdays]]
+        FI, FJ = np.meshgrid(fi - r0, fj - k0, indexing="ij")
+        return np.stack([map_coordinates(w, [FI, FJ], order=1, mode="nearest") for w in win])
+
+    def _cube_days(self, ch: str, gdays, y0: int, x0: int) -> np.ndarray:
+        """Cube channel `ch` (name, raw units) for global days, any year; zeros where no cube."""
+        import datetime as _dt
+        out = np.zeros((len(gdays), self.ph, self.pw), np.float32)
+        for k, g in enumerate(gdays):
+            d = _dt.date(2015, 1, 1) + _dt.timedelta(days=int(g))
+            if d.year in self.x_by_year:
+                X, chy = self.x_by_year[d.year]
+                out[k] = np.asarray(X[d.timetuple().tm_yday - 1, y0:y0 + self.ph, x0:x0 + self.pw, chy[ch]],
+                                    np.float32)
+        return np.nan_to_num(out)
+
+    def _perfect_forecast(self, t_end: int, y0: int, x0: int) -> np.ndarray:
+        """(T, H, W, 5): weather of days s+1..s+3 for every fast step s (see
+        DualPatchConfig.perfect_forecast). Reads only weather stores."""
+        T = self.t_fast
+        g_first = t_end - T + int(self.cfg.day_offset)            # issue day of step 0
+        gdays = list(range(g_first + 1, g_first + T + 3))         # s+1 of step 0 .. s+3 of step T-1
+        st = self.barra_stats
+        wmax = np.nan_to_num(self._barra_patch("sfcWindmax", gdays, y0, x0))
+        u = np.nan_to_num(self._barra_patch("uas", gdays, y0, x0))
+        v = np.nan_to_num(self._barra_patch("vas", gdays, y0, x0))
+        vpd = self._cube_days("VPD", gdays, y0, x0)
+        ppt = self._cube_days("PPT", gdays, y0, x0)
+        iv, ip = CH["VPD"], CH["PPT"]
+        out = np.empty((T, self.ph, self.pw, 5), np.float32)
+        for j in range(T):
+            w = slice(j, j + 3)                                   # days s_j+1 .. s_j+3
+            out[j, ..., 0] = (wmax[w].max(0) - st["sfcWindmax"][0]) / st["sfcWindmax"][1]
+            out[j, ..., 1] = (u[w].mean(0) - st["uas"][0]) / st["uas"][1]
+            out[j, ..., 2] = (v[w].mean(0) - st["vas"][0]) / st["vas"][1]
+            out[j, ..., 3] = (vpd[w].max(0) - self.x_mean_all[iv]) / self.x_std_all[iv]
+            out[j, ..., 4] = (ppt[w].sum(0) - 3 * self.x_mean_all[ip]) / (np.sqrt(3) * self.x_std_all[ip])
+        return out
+
     def _vpd_anomaly(self, vpd_raw: np.ndarray, t_end: int, y0: int, x0: int) -> np.ndarray:
         """(T, H, W) standardized VPD anomaly of fast days t_end-T .. t_end-1."""
         import datetime as _dt
@@ -627,6 +718,12 @@ class DualWindowDataset(Dataset):
         x_fast = self._read_span(t_end, cfg.fast_days, self.read_fast_idx)
         x_fast = np.nan_to_num(x_fast, nan=0.0, posinf=0.0, neginf=0.0)
         vpd_raw = x_fast[..., FAST_CHANNELS.index("VPD")].copy() if self.use_vpd_anomaly else None
+        if self.vpd_source == "barra":
+            iv = FAST_CHANNELS.index("VPD")
+            g0 = t_end - self.t_fast + int(cfg.day_offset)
+            bv = self._barra_patch("vpd", range(g0, g0 + self.t_fast), y0, x0)
+            x_fast[..., iv] = (np.nan_to_num(bv) - self.barra_stats["vpd"][0]) / self.barra_stats["vpd"][1] \
+                * self.fast_std[iv] + self.fast_mean[iv]          # undone by the normalization below
         x_fast = (x_fast - self.fast_mean[None, None, None, :]) / self.fast_std[None, None, None, :]
 
         # ---- target: fast branch is daily, so y aligns with its axis ----
@@ -789,6 +886,9 @@ class DualWindowDataset(Dataset):
         if self.use_vpd_anomaly:
             x_fast = np.concatenate([x_fast, self._vpd_anomaly(vpd_raw, t_end, y0, x0)[..., None]], axis=-1)
 
+        if self.perfect_forecast:
+            x_fast = np.concatenate([x_fast, self._perfect_forecast(t_end, y0, x0)], axis=-1)
+
         # Fire-history feature dropout (TRAIN only): blank fire_hist_t-3/4/5 +
         # fire_dist to 0 for this sample with probability fire_history_dropout_
         # prob, forcing the network to predict from weather/terrain alone when
@@ -931,6 +1031,8 @@ class DualDataModule(pl.LightningDataModule):
         min_new_fire_pixels: int = 1,
         past_fire_dist_store: Optional[str] = None,
         use_vpd_anomaly: bool = False,
+        vpd_source: str = "montes",
+        perfect_forecast: bool = False,
         min_pos_pixels: int = 20,   # scale with patch area to hold fire-DENSITY fixed
                                      # across patch-size experiments: 20/256^2 = 0.0305%
         train_seed: int = 123,      # override for multi-seed noise-floor checks;
@@ -987,6 +1089,7 @@ class DualDataModule(pl.LightningDataModule):
             fire_history_dropout_prob=h.fire_history_dropout_prob,
             past_fire_dist_store=h.past_fire_dist_store,
             use_vpd_anomaly=h.use_vpd_anomaly,
+            vpd_source=h.vpd_source, perfect_forecast=h.perfect_forecast,
         ))
         self.val_ds = DualWindowDataset(DualPatchConfig(
             zarr_paths=tuple(h.val_paths), stats_path=h.stats_path,
@@ -1011,6 +1114,7 @@ class DualDataModule(pl.LightningDataModule):
             use_ffdi=h.use_ffdi, use_fmc=h.use_fmc, fmc_store=h.fmc_store,
             augment=False,   # val is always deterministic/unaugmented, regardless of h.augment
             use_vpd_anomaly=h.use_vpd_anomaly,
+            vpd_source=h.vpd_source, perfect_forecast=h.perfect_forecast,
             fire_history_dropout_prob=0.0,  # val must see the real fire-history signal always
         ))
 
