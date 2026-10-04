@@ -96,6 +96,8 @@ def main():
         GROUPS[0] = ("NDVI", GROUPS[0][1], None)
     elif ds.slow_veg == "lai+ndvi":             # appended as the last slow channel
         GROUPS.insert(1, ("NDVI", [("s", [-1])], None))
+    if ds.use_fast_ndvi:
+        GROUPS.insert(1, ("NDVI (fast branch)", [("f", [ds.fast_ndvi_idx])], None))
     if ds.use_vpd_anomaly:                      # appended as the last fast channel
         GROUPS.insert(6, ("VPD anomaly", [("f", [-1])], None))
     stats = json.loads(CHANNEL_STATS.read_text())

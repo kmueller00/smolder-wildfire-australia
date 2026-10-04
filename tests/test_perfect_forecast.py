@@ -162,6 +162,27 @@ def test_fire_history_dropout_blanks_frp():
     assert torch.all(b["x_fast"][..., -3:] == 0)                    # FRP channels blanked too
 
 
+def test_fast_ndvi_channel_and_position():
+    import json
+    st = json.load(open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                     "smolder", "data", "channel_stats_2015_2018.json")))
+    cube = open_zarr_root("cube_daily_smgrid_2019.zarr")
+    for kw in (dict(use_fast_ndvi=True), dict(use_fast_ndvi=True, use_frp=True, use_barra_uv=True,
+                                               use_vpd_anomaly=True, vpd_source="barra")):
+        base = _ds(**{k: v for k, v in kw.items() if k != "use_fast_ndvi"})
+        ds = _ds(**kw)
+        b0, b1 = base.sample_at(T_END, Y0, X0), ds.sample_at(T_END, Y0, X0)
+        i = ds.fast_ndvi_idx
+        assert b1["x_fast"].shape[-1] == b0["x_fast"].shape[-1] + 1
+        assert torch.equal(b1["x_fast"][..., :i], b0["x_fast"][..., :i])          # before it: unchanged
+        assert torch.equal(b1["x_fast"][..., i + 1:], b0["x_fast"][..., i:])      # after it: shifted by one
+        T = b1["x_fast"].shape[0]
+        for j in (0, T - 1):
+            t = T_END - T + j
+            raw = np.nan_to_num(np.asarray(cube["X"][t, Y0:Y0 + 64, X0:X0 + 64, 5], np.float32))
+            assert np.allclose(b1["x_fast"][j, ..., i].numpy(), (raw - st["x_mean"][5]) / st["x_std"][5], atol=1e-5)
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):
