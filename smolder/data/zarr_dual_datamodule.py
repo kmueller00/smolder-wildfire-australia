@@ -253,6 +253,22 @@ def expand_compact(batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
     return batch
 
 
+def limit_worker_threads(n: int = 1) -> None:
+    """One thread per numerical library in a data worker. Forked workers
+    inherit numpy's and scipy's OpenBLAS pools (64 threads each), an OpenMP
+    pool (72) and Blosc's decompression threads (8); torch limits only its
+    own. With 16 workers on 32 cores they oversubscribed the node: workers
+    ran 34 threads each and the GPU waited about half the time (job 1831064).
+    Thread counts do not change any value (tests/test_fast_inputs.py)."""
+    try:
+        from threadpoolctl import threadpool_limits
+        threadpool_limits(n)
+    except ImportError:
+        pass
+    from numcodecs import blosc
+    blosc.use_threads = False
+
+
 def seed_worker(worker_id: int) -> None:
     """DataLoader worker_init_fn: give every worker its own random stream.
 
@@ -263,6 +279,7 @@ def seed_worker(worker_id: int) -> None:
     (seed, worker_id). Deterministic datasets reseed per index and are not
     affected. LEGACY_WORKER_RNG=1 keeps the old behaviour (to reproduce the
     released model's training exactly)."""
+    limit_worker_threads()
     info = torch.utils.data.get_worker_info()
     ds = info.dataset
     if os.environ.get("LEGACY_WORKER_RNG", "0") == "1" or getattr(ds.cfg, "deterministic", False):
