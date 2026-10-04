@@ -37,6 +37,8 @@ CH = {"SM": 0, "WIND": 1, "VPD": 2, "PPT": 3, "LST": 4, "NDVI": 5, "LAI": 6}
 # NDVI (5) deliberately absent: redundant with LAI, see module docstring.
 SLOW_CHANNELS = ("LAI", "SM", "PPT")
 FAST_CHANNELS = ("VPD", "LST", "WIND")
+# variables of barra_c2_fast.zarr's x, in channel order (build_fast_stores)
+BARRA_FAST_VARS = ["vpd", "uas", "vas"]
 
 # PPT accumulates (a single heavy rain day matters and would be lost by
 # striding); the others are averaged over each bin.
@@ -215,6 +217,40 @@ class DualPatchConfig:
     use_fast_ndvi: bool = field(default_factory=lambda: os.environ.get("USE_FAST_NDVI", "0") == "1")
     ndvi_slow_store: str = "cube_slow_8day_ndvi.zarr"
     lai500_slow_store: str = "cube_slow_8day_lai500.zarr"   # SLOW_VEG=lai500 (build_lai500_slow)
+    # Read y_fire_3d, fuel age, FRP, BARRA vpd/uas/vas and (SLOW_VEG=lai500)
+    # the slow bins from the time-blocked copies of smolder.data.build_fast_stores:
+    # the same values in ~50 instead of ~560 chunk files per sample. FRP comes
+    # as precomputed per-day features, BARRA is interpolated with two matrix
+    # products instead of map_coordinates (same bilinear weights, float64).
+    fast_stores: bool = field(default_factory=lambda: os.environ.get("FAST_STORES", "0") == "1")
+    fire_store: str = "fire_inputs_continental.zarr"
+    barra_fast_store: str = "barra_c2_fast.zarr"
+    slow_lai500m_store: str = "cube_slow_8day_lai500m.zarr"
+    # Leave the statics and day-of-year channels out of x_slow/x_fast and return
+    # them once per sample ("x_static", "doy_slow", "doy_fast"); expand_compact()
+    # inserts them again on the GPU at the same channel positions. Training only
+    # (DualDataModule); a dataset used directly keeps the full layout.
+    compact_statics: bool = False
+
+
+def expand_compact(batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+    """Insert the statics and day-of-year channels that compact_statics left
+    out, on whatever device the batch is on: x_static is broadcast over the
+    time steps and doy_slow/doy_fast over the patch, right after the dynamic
+    variables -- the positions _append_statics puts them at. A batch without
+    doy_fast is returned unchanged."""
+    if "doy_fast" not in batch:
+        return batch
+    st = batch["x_static"]                                   # (B, H, W, S)
+    for key, dkey, n_dyn in (("x_slow", "doy_slow", len(SLOW_CHANNELS)),
+                             ("x_fast", "doy_fast", len(FAST_CHANNELS))):
+        x, d = batch[key], batch.pop(dkey)                   # (B, T, H, W, C), (B, T, 2)
+        B, T, H, W, _ = x.shape
+        batch[key] = torch.cat([x[..., :n_dyn],
+                                st[:, None].to(x.dtype).expand(B, T, H, W, st.shape[-1]),
+                                d[:, :, None, None, :].to(x.dtype).expand(B, T, H, W, d.shape[-1]),
+                                x[..., n_dyn:]], dim=-1)
+    return batch
 
 
 def seed_worker(worker_id: int) -> None:
@@ -539,6 +575,41 @@ class DualWindowDataset(Dataset):
                                   + 2 * int(self.use_fmc) + 3 * int(self.use_frp) + 2 * int(self.use_barra_uv))
         self.fire_history_dropout_prob = float(getattr(cfg, "fire_history_dropout_prob", 0.0))
 
+        # ---- compact statics: channels left out of x_slow/x_fast per sample ----
+        self.compact = bool(getattr(cfg, "compact_statics", False))
+        self.static_doy_width = (2 + int(self.use_lightning) + int(self.use_elevation)
+                                 + 3 * int(self.use_slope_aspect) + (2 if getattr(cfg, "add_doy", True) else 0))
+        if self.compact and (getattr(cfg, "augment", False) or getattr(cfg, "vslow_days", 0)):
+            raise ValueError("compact_statics does not support augment or the very-slow branch")
+
+        # ---- time-blocked input stores (build_fast_stores) ----
+        self.fire_y = self.frp_feat = self.barra_fast = None
+        self._bcache_key = None
+        if getattr(cfg, "fast_stores", False):
+            import datetime as _dt
+            for ci in range(len(self.groups)):      # local day + day_offset = global day
+                g_start = (_dt.date(self.cube_year[ci], 1, 1) - _dt.date(2015, 1, 1)).days
+                assert int(self.offsets[ci]) + int(cfg.day_offset) == g_start, (ci, self.offsets, cfg.day_offset)
+            fg = open_zarr_root(cfg.fire_store)
+            if cfg.y_key == "y_fire_3d":
+                self.fire_y = fg["y_fire_3d"]
+            if self.use_fuel_age:
+                self.fire_age = fg["age_px"]
+            if self.use_frp:
+                self.frp_feat = fg["frp_feat"]
+            if hasattr(self, "barra"):
+                bf = open_zarr_root(cfg.barra_fast_store)
+                assert list(bf.attrs["variables"]) == BARRA_FAST_VARS, bf.attrs["variables"]
+                assert np.array_equal(np.asarray(bf["lat"][...]), self.barra_lat)
+                assert np.array_equal(np.asarray(bf["lon"][...]), self.barra_lon)
+                self.barra_fast = bf["x"]
+            if self.slow_veg == "lai500":            # LAI500, SM, PPT in one array
+                sg = open_zarr_root(cfg.slow_lai500m_store)
+                assert np.array_equal(np.asarray(sg["bin_start_day"][...]), self.slow_bin_start)
+                assert tuple(sg.attrs["channels"]) == tuple(SLOW_CHANNELS), sg.attrs["channels"]
+                self.slow_cube = sg["X_slow"]
+                self.lai500_slow = None
+
         # ---- valid target days ----
         # Need slow_days of history behind the target. With a day_offset the
         # history may live *before* this split's first day (e.g. the 2019 val
@@ -616,6 +687,10 @@ class DualWindowDataset(Dataset):
         pad_before = max(0, -t_lo)
         t = max(t_lo, 0)
         parts = []
+        if self.fire_y is not None and key == self.cfg.y_key and t < t_end:
+            off = int(self.cfg.day_offset)          # days before the split stay zero, as below
+            parts.append(np.asarray(self.fire_y[t + off:t_end + off, y0:y0 + self.ph, x0:x0 + self.pw]))
+            t = t_end
         while t < t_end:
             ci, lt = self._locate(t)
             cube_end = int(self.offsets[ci]) + self.groups[ci][key].shape[0]
@@ -629,6 +704,13 @@ class DualWindowDataset(Dataset):
             pad = np.zeros((pad_before, self.ph, self.pw), dtype=out.dtype)
             out = np.concatenate([pad, out], axis=0)
         return out
+
+    def _y_patch(self, t: int, y0: int, x0: int) -> np.ndarray:
+        """y_key of local day t for the patch at (y0, x0)."""
+        if self.fire_y is not None:
+            return np.asarray(self.fire_y[t + int(self.cfg.day_offset), y0:y0 + self.ph, x0:x0 + self.pw])
+        ci, lt = self._locate(t)
+        return np.asarray(self.groups[ci][self.cfg.y_key][lt, y0:y0 + self.ph, x0:x0 + self.pw])
 
     def _patch_ok(self, y0: int, x0: int) -> bool:
         m = self.landmask[y0:y0 + self.ph, x0:x0 + self.pw]
@@ -661,8 +743,7 @@ class DualWindowDataset(Dataset):
                 continue
             if not force_pos and not force_new_fire:
                 break
-            ci, lt = self._locate(t_end - 1)      # last-step target: y_fire_3d[t_end-1]
-            y_chk = self.groups[ci][cfg.y_key][lt, y0:y0 + self.ph, x0:x0 + self.pw]
+            y_chk = self._y_patch(t_end - 1, y0, x0)      # last-step target: y_fire_3d[t_end-1]
             # Count LAND fire only: y_fire_3d labels ocean as y=1 (98.6% of ocean
             # pixels), so a raw (y>0).sum() accepts pure seawater as a "fire"
             # patch -- measured at 83% of accepted positives in the v2 sampler.
@@ -674,8 +755,7 @@ class DualWindowDataset(Dataset):
                 tg3 = t_end - 1 - 3                # newest fire-history window of the last step
                 if tg3 < 0:
                     continue
-                ci3, lt3 = self._locate(tg3)
-                recent = np.asarray(self.groups[ci3][cfg.y_key][lt3, y0:y0 + self.ph, x0:x0 + self.pw]) > 0
+                recent = self._y_patch(tg3, y0, x0) > 0
                 if int((y_land & ~recent).sum()) < max(1, min_new_fire):
                     continue
             break
@@ -693,6 +773,8 @@ class DualWindowDataset(Dataset):
     def _barra_patch(self, var: str, gdays, y0: int, x0: int) -> np.ndarray:
         """BARRA-C2 `var` for global days `gdays`, bilinearly interpolated to the
         patch, (len(gdays), H, W) float32."""
+        if self.barra_fast is not None and var in BARRA_FAST_VARS:
+            return self._barra_patch_fast(var, gdays, y0, x0)
         from scipy.ndimage import map_coordinates
         c0, a, f0, e = self._GT
         lat = f0 + (np.arange(y0, y0 + self.ph) + 0.5) * e
@@ -706,6 +788,47 @@ class DualWindowDataset(Dataset):
         win = win[[g - gdays[0] for g in gdays]]
         FI, FJ = np.meshgrid(fi - r0, fj - k0, indexing="ij")
         return np.stack([map_coordinates(w, [FI, FJ], order=1, mode="nearest") for w in win])
+
+    @staticmethod
+    def _linear_weights(c: np.ndarray, n: int) -> np.ndarray:
+        """(len(c), n) matrix of 1-D linear interpolation weights at the
+        fractional positions c, edges extended (map_coordinates order=1,
+        mode="nearest")."""
+        A = np.zeros((c.size, n), np.float64)
+        if n == 1:
+            A[:, 0] = 1.0
+            return A
+        c = np.clip(c, 0.0, n - 1.0)
+        i0 = np.minimum(np.floor(c).astype(np.int64), n - 2)
+        w = c - i0
+        rows = np.arange(c.size)
+        A[rows, i0] = 1.0 - w
+        A[rows, i0 + 1] += w
+        return A
+
+    def _barra_patch_fast(self, var: str, gdays, y0: int, x0: int) -> np.ndarray:
+        """_barra_patch from barra_c2_fast.zarr: one read of vpd, uas and vas
+        for the day range (kept for the next variable of the same sample), and
+        bilinear interpolation as A_lat @ field @ A_lon^T."""
+        gdays = list(gdays)
+        key = (gdays[0], gdays[-1], y0, x0)
+        if self._bcache_key != key:
+            c0, a, f0, e = self._GT
+            fi = (f0 + (np.arange(y0, y0 + self.ph) + 0.5) * e - self.barra_lat[0]) / (self.barra_lat[1] - self.barra_lat[0])
+            fj = (c0 + (np.arange(x0, x0 + self.pw) + 0.5) * a - self.barra_lon[0]) / (self.barra_lon[1] - self.barra_lon[0])
+            r0, r1 = int(np.floor(fi.min())), int(np.ceil(fi.max())) + 1
+            k0, k1 = int(np.floor(fj.min())), int(np.ceil(fj.max())) + 1
+            win = np.asarray(self.barra_fast[gdays[0]:gdays[-1] + 1, r0:r1 + 1, k0:k1 + 1, :], np.float32)
+            self._bcache = (win, self._linear_weights(fi - r0, win.shape[1]),
+                            self._linear_weights(fj - k0, win.shape[2]), fi - r0, fj - k0)
+            self._bcache_key = key
+        win, Ar, Ak, fi, fj = self._bcache
+        w = win[[g - gdays[0] for g in gdays], :, :, BARRA_FAST_VARS.index(var)]
+        if not np.isfinite(w).all():                 # a product would spread a NaN over the whole patch
+            from scipy.ndimage import map_coordinates
+            FI, FJ = np.meshgrid(fi, fj, indexing="ij")
+            return np.stack([map_coordinates(d, [FI, FJ], order=1, mode="nearest") for d in w])
+        return (Ar[None] @ w.astype(np.float64) @ Ak.T[None]).astype(np.float32)
 
     def _barra_static(self, name: str, y0: int, x0: int) -> np.ndarray:
         """A (k, lat, lon) array of the BARRA store, bilinearly interpolated to the patch."""
@@ -854,9 +977,10 @@ class DualWindowDataset(Dataset):
         x_slow = (x_slow - self.slow_mean[None, None, None, :]) / self.slow_std[None, None, None, :]
         ndvi_slow = None
         if self.slow_veg == "lai500":                               # same bins, same LAI normalization
-            il = SLOW_CHANNELS.index("LAI")
-            lv = np.asarray(self.lai500_slow[b_lo:b_end, y0:y0 + self.ph, x0:x0 + self.pw, 0], np.float32)
-            x_slow[..., il] = (np.nan_to_num(lv) - self.slow_mean[il]) / self.slow_std[il]
+            if self.lai500_slow is not None:                        # (fast stores: already channel 0)
+                il = SLOW_CHANNELS.index("LAI")
+                lv = np.asarray(self.lai500_slow[b_lo:b_end, y0:y0 + self.ph, x0:x0 + self.pw, 0], np.float32)
+                x_slow[..., il] = (np.nan_to_num(lv) - self.slow_mean[il]) / self.slow_std[il]
         elif self.slow_veg != "lai":                                # same bins b_lo..b_end as x_slow
             nd = np.asarray(self.ndvi_slow[b_lo:b_end, y0:y0 + self.ph, x0:x0 + self.pw, 0], np.float32)
             ndvi_slow = (np.nan_to_num(nd) - self.x_mean_all[CH["NDVI"]]) / self.x_std_all[CH["NDVI"]]
@@ -903,10 +1027,13 @@ class DualWindowDataset(Dataset):
         x_fast = (x_fast - self.fast_mean[None, None, None, :]) / self.fast_std[None, None, None, :]
 
         # ---- target: fast branch is daily, so y aligns with its axis ----
-        y = np.empty((self.t_fast, self.ph, self.pw), dtype=np.float32)
-        for j, t in enumerate(range(t_end - self.t_fast, t_end)):
-            ci, lt = self._locate(t)
-            y[j] = self.groups[ci][cfg.y_key][lt, y0:y0 + self.ph, x0:x0 + self.pw]
+        if self.fire_y is not None:
+            y = self._read_y_span(t_end, self.t_fast, cfg.y_key).astype(np.float32)
+        else:
+            y = np.empty((self.t_fast, self.ph, self.pw), dtype=np.float32)
+            for j, t in enumerate(range(t_end - self.t_fast, t_end)):
+                ci, lt = self._locate(t)
+                y[j] = self.groups[ci][cfg.y_key][lt, y0:y0 + self.ph, x0:x0 + self.pw]
 
         # ---- statics appended to BOTH branches (agb from the target's year) ----
         agb_p = self._agb(ci_t)[y0:y0 + self.ph, x0:x0 + self.pw]
@@ -922,14 +1049,21 @@ class DualWindowDataset(Dataset):
             static_list.append(self.aspect_cos[y0:y0 + self.ph, x0:x0 + self.pw])
         st = np.stack(static_list, axis=-1)  # (ph,pw,2..7) depending on optional statics
 
+        doy_sc = {}
+
         def _append_statics(x, n_steps, day_starts):
-            extra = [np.repeat(st[None], n_steps, axis=0)]
+            sc = np.zeros((n_steps, 0), np.float32)
             if cfg.add_doy:
                 doy = (np.asarray(day_starts, dtype=np.float32) + 1.0) / 365.25
                 ang = 2.0 * np.pi * doy
-                sc = np.stack([np.sin(ang), np.cos(ang)], axis=-1)
+                sc = np.stack([np.sin(ang), np.cos(ang)], axis=-1).astype(np.float32)
+            if self.compact:                   # inserted on the GPU by expand_compact
+                doy_sc[len(doy_sc)] = sc
+                return x
+            extra = [np.repeat(st[None], n_steps, axis=0)]
+            if cfg.add_doy:
                 sc = np.broadcast_to(sc[:, None, None, :], (n_steps, self.ph, self.pw, 2))
-                extra.append(np.ascontiguousarray(sc.astype(np.float32)))
+                extra.append(np.ascontiguousarray(sc))
             return np.concatenate([x] + extra, axis=-1)
 
         # DOY uses each step's representative day (bin start for slow, day for fast).
@@ -994,8 +1128,7 @@ class DualWindowDataset(Dataset):
         def _recent_fire(s_j):
             if s_j - 3 < 0:
                 return np.zeros((self.ph, self.pw), bool)
-            ci_h, lt_h = self._locate(s_j - 3)
-            return (np.asarray(self.groups[ci_h][cfg.y_key][lt_h, y0:y0 + self.ph, x0:x0 + self.pw]) > 0) & (lm_p > 0)
+            return (self._y_patch(s_j - 3, y0, x0) > 0) & (lm_p > 0)
 
         if self.use_fuel_age and self.fire_age is not None:
             LB = self.fuel_age_lookback
@@ -1072,7 +1205,12 @@ class DualWindowDataset(Dataset):
             x_fast = np.concatenate([x_fast, fm], axis=-1)
 
         frp_slice = None
-        if self.use_frp:
+        if self.use_frp and self.frp_feat is not None:      # per-day features over s_j-2..s_j
+            off = int(cfg.day_offset)
+            fr = np.asarray(self.frp_feat[t_end - T + off:t_end + off, y0:y0 + self.ph, x0:x0 + self.pw], np.float32)
+            frp_slice = slice(x_fast.shape[-1], x_fast.shape[-1] + 3)
+            x_fast = np.concatenate([x_fast, fr * lm_p[None, :, :, None]], axis=-1)
+        elif self.use_frp:
             g_lo = t_end - T - 2 + int(cfg.day_offset)            # step 0 needs s_0-2 .. s_0
             g_hi = t_end + int(cfg.day_offset)                    # exclusive: step T-1 ends on t_end-1
             sl = (slice(g_lo, g_hi), slice(y0, y0 + self.ph), slice(x0, x0 + self.pw))
@@ -1100,7 +1238,8 @@ class DualWindowDataset(Dataset):
         if self.use_fast_ndvi:
             nd = np.nan_to_num(ndvi_raw)
             nd = (nd - self.x_mean_all[CH["NDVI"]]) / self.x_std_all[CH["NDVI"]]
-            assert x_fast.shape[-1] == self.fast_ndvi_idx, (x_fast.shape, self.fast_ndvi_idx)
+            assert x_fast.shape[-1] == self.fast_ndvi_idx - self.compact * self.static_doy_width, \
+                (x_fast.shape, self.fast_ndvi_idx)
             x_fast = np.concatenate([x_fast, nd[..., None].astype(np.float32)], axis=-1)
 
         if self.use_vpd_anomaly:
@@ -1117,7 +1256,7 @@ class DualWindowDataset(Dataset):
         # already ->0 far from any fire), not a corruption. See DualPatchConfig.
         if (self.fire_history_dropout_prob > 0.0 and self.fire_hist_start_idx is not None
                 and not cfg.deterministic and self.rng.random() < self.fire_history_dropout_prob):
-            i0 = self.fire_hist_start_idx
+            i0 = self.fire_hist_start_idx - self.compact * self.static_doy_width
             x_fast[..., i0:i0 + self.n_fire_hist_channels] = 0.0
             if frp_slice is not None:
                 x_fast[..., frp_slice] = 0.0
@@ -1126,8 +1265,9 @@ class DualWindowDataset(Dataset):
 
         if not hasattr(self, "_layout_n"):
             self._layout_n = self.channel_layout()["n"]
-        assert (x_slow.shape[-1], x_fast.shape[-1]) == (self._layout_n["slow"], self._layout_n["fast"]), \
-            (x_slow.shape, x_fast.shape, self._layout_n)
+        cw = self.compact * self.static_doy_width
+        assert (x_slow.shape[-1], x_fast.shape[-1]) == (self._layout_n["slow"] - cw, self._layout_n["fast"] - cw), \
+            (x_slow.shape, x_fast.shape, self._layout_n, cw)
         out = {
             "x_slow": torch.from_numpy(np.ascontiguousarray(x_slow)),
             "x_fast": torch.from_numpy(np.ascontiguousarray(x_fast)),
@@ -1141,6 +1281,9 @@ class DualWindowDataset(Dataset):
             "y0": torch.tensor(y0, dtype=torch.int64),
             "x0": torch.tensor(x0, dtype=torch.int64),
         }
+        if self.compact:
+            out["doy_slow"] = torch.from_numpy(doy_sc[0])
+            out["doy_fast"] = torch.from_numpy(doy_sc[1])
         if x_vslow is not None:
             out["x_vslow"] = torch.from_numpy(np.ascontiguousarray(x_vslow))
         if getattr(cfg, "past_fire_dist_store", None):
@@ -1265,6 +1408,7 @@ class DualDataModule(pl.LightningDataModule):
         use_fast_ndvi: bool = False,
         vpd_source: str = "montes",
         perfect_forecast: bool = False,
+        compact_statics: bool = False,   # statics/day of year inserted on the GPU (expand_compact)
         min_pos_pixels: int = 20,   # scale with patch area to hold fire-DENSITY fixed
                                      # across patch-size experiments: 20/256^2 = 0.0305%
         train_seed: int = 123,      # override for multi-seed noise-floor checks;
@@ -1323,6 +1467,7 @@ class DualDataModule(pl.LightningDataModule):
             use_vpd_anomaly=h.use_vpd_anomaly,
             vpd_source=h.vpd_source, perfect_forecast=h.perfect_forecast,
             use_frp=h.use_frp, use_barra_uv=h.use_barra_uv, slow_veg=h.slow_veg, use_fast_ndvi=h.use_fast_ndvi,
+            compact_statics=h.compact_statics,
         ))
         self.val_ds = DualWindowDataset(DualPatchConfig(
             zarr_paths=tuple(h.val_paths), stats_path=h.stats_path,
@@ -1350,6 +1495,7 @@ class DualDataModule(pl.LightningDataModule):
             vpd_source=h.vpd_source, perfect_forecast=h.perfect_forecast,
             use_frp=h.use_frp, use_barra_uv=h.use_barra_uv, slow_veg=h.slow_veg, use_fast_ndvi=h.use_fast_ndvi,
             fire_history_dropout_prob=0.0,  # val must see the real fire-history signal always
+            compact_statics=h.compact_statics,
         ))
 
     def _dl(self, ds, shuffle=False):

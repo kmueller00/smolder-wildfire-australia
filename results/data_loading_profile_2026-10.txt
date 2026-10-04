@@ -1,0 +1,45 @@
+Data-loading profile of full-model training samples (2026-10-05)
+Login node fritz, single process, NFS, cold cache (seeds not drawn before), 16 samples each.
+Inputs: SLOW_VEG=lai500 USE_FRP=1 USE_BARRA_UV=1 USE_FUEL_AGE=1 (1095 d) USE_ELEVATION=1
+USE_SLOPE_ASPECT=1 VPD_SOURCE=barra USE_FAST_NDVI=1, patch 384, fire history 3/4/5 + distance.
+Script: per-store DirectoryStore.__getitem__ timing (chunk file reads only; decompression and
+numpy work are in "per sample" but not in the store rows).
+
+=== FAST_STORES=0 COMPACT_STATICS=0 seed=321
+MB per sample tensor 313
+N=16  total 83.8s  per sample 5.24s  build 5.23s  sampler 0.01s
+phase    store                            array            reads/smp  MB/smp  s/smp
+build    cube_slow_8day_lai500.zarr       X_slow                56.2   26.86  1.340
+build    barra_c2_daily.zarr              vas                   31.6    2.45  0.462
+build    barra_c2_daily.zarr              uas                   31.6    2.42  0.419
+build    firms_daily.zarr                 frp_sum               51.0    0.07  0.352
+build    fire_age_continental.zarr        age_px                43.8    2.76  0.269
+build    firms_daily.zarr                 n_det                 51.0    0.01  0.256
+build    firms_daily.zarr                 n_night               51.0    0.01  0.250
+build    barra_c2_daily.zarr              vpd                   31.6    2.14  0.120
+build    cube_daily_smgrid_2017.zarr      X                      3.1   50.57  0.070
+build    cube_slow_8day.zarr              X_slow                10.5  147.47  0.068
+build    cube_daily_smgrid_2018.zarr      y_fire_3d             87.7    0.09  0.056
+ALL reads/smp 599  MB/smp 414.0  file-read s/smp 3.88
+
+=== FAST_STORES=1 COMPACT_STATICS=1 seed=654
+MB per sample tensor 162
+N=16  total 34.7s  per sample 2.17s  build 2.01s  sampler 0.16s
+phase    store                            array            reads/smp  MB/smp  s/smp
+build    cube_slow_8day_lai500m.zarr      X_slow                13.1   93.89  0.704
+build    barra_c2_fast.zarr               x                      4.1    8.52  0.181
+build    cube_daily_smgrid_2015.zarr      X                      3.4   62.23  0.139
+sampler  fire_inputs_continental.zarr     y_fire_3d             27.6    0.04  0.134
+build    fire_inputs_continental.zarr     age_px                10.0    2.55  0.106
+build    cube_daily_smgrid_2017.zarr      X                      3.1   72.52  0.090
+build    fire_inputs_continental.zarr     frp_feat              11.6    0.20  0.065
+build    fire_inputs_continental.zarr     y_fire_3d             22.4    0.06  0.039
+build    cube_daily_smgrid_2016.zarr      X                      0.9   26.65  0.030
+build    cube_daily_smgrid_2018.zarr      X                      2.9   69.30  0.028
+build    cube_daily_smgrid_2016.zarr      agb                    4.0    0.34  0.002
+ALL reads/smp 115  MB/smp 337.3  file-read s/smp 1.52
+
+Equivalence (tests/test_fast_inputs.py): FAST_STORES samples equal the original path for every
+tensor and channel (2019 and 2015-16, incl. a zero-padded first target and training draws);
+BARRA channels max |difference| 0.0. COMPACT_STATICS batches after expand_compact equal the
+full layout exactly; sample tensors are 0.49 of the full input volume.

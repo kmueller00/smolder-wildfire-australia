@@ -131,6 +131,14 @@ class ConvLSTMLitDual(ConvLSTMLitV2):
 
     # ------------------------------------------------------------------
 
+    def on_after_batch_transfer(self, batch: Any, dataloader_idx: int) -> Any:
+        # compact_statics batches carry statics/day of year once per sample;
+        # insert them on the GPU (unchanged for full-layout batches)
+        from smolder.data.zarr_dual_datamodule import expand_compact
+        if isinstance(batch, dict):
+            batch = expand_compact(batch)
+        return batch
+
     def _shared_step(self, batch: Dict[str, Any]):
         x_slow = batch["x_slow"]
         x_fast = batch["x_fast"]

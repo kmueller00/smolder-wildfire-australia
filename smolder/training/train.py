@@ -22,7 +22,7 @@ from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping, Learning
 
 from smolder.models.conv_lstm_lit_dual import ConvLSTMLitDual
 from smolder.data.io import CHANNEL_STATS, resolve
-from smolder.data.zarr_dual_datamodule import DualDataModule, SLOW_CHANNELS, FAST_CHANNELS
+from smolder.data.zarr_dual_datamodule import DualDataModule, SLOW_CHANNELS, FAST_CHANNELS, expand_compact
 
 MAX_EPOCHS = 25
 
@@ -150,10 +150,11 @@ def main():
         use_barra_uv=os.environ.get("USE_BARRA_UV", "0") == "1",
         slow_veg=os.environ.get("SLOW_VEG", "lai"),
         use_fast_ndvi=os.environ.get("USE_FAST_NDVI", "0") == "1",
+        compact_statics=os.environ.get("COMPACT_STATICS", "0") == "1",
     )
 
     dm.setup("fit")
-    b0 = next(iter(dm.train_dataloader()))
+    b0 = expand_compact(next(iter(dm.train_dataloader())))
     c_slow = int(b0["x_slow"].shape[-1])
     c_fast = int(b0["x_fast"].shape[-1])
     c_static = int(b0["x_static"].shape[-1])
