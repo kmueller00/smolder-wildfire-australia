@@ -197,6 +197,13 @@ class DualPatchConfig:
     # fast day as 2 fast-branch channels, normalized with the store's
     # 2015-2018 statistics. Absolute directions: incompatible with augment.
     use_barra_uv: bool = field(default_factory=lambda: os.environ.get("USE_BARRA_UV", "0") == "1")
+    # Vegetation in the slow branch: "lai" (HiQ-LAI 5 km, default), "ndvi"
+    # (MODIS 500 m NDVI from the cubes in place of LAI) or "lai+ndvi" (NDVI as
+    # an extra slow channel, appended last so no other channel moves). NDVI
+    # 8-day means on the slow cube's bins come from cube_slow_8day_ndvi.zarr
+    # (build_slow_cube with CHANNELS=NDVI).
+    slow_veg: str = field(default_factory=lambda: os.environ.get("SLOW_VEG", "lai"))
+    ndvi_slow_store: str = "cube_slow_8day_ndvi.zarr"
 
 
 def check_checkpoint_inputs(ckpt_path: str) -> None:
@@ -209,14 +216,14 @@ def check_checkpoint_inputs(ckpt_path: str) -> None:
     now = DualPatchConfig(zarr_paths=(), stats_path="")
     diffs = []
     for key, default in (("vpd_source", "montes"), ("use_vpd_anomaly", False), ("perfect_forecast", False),
-                         ("use_frp", False), ("use_barra_uv", False)):
+                         ("use_frp", False), ("use_barra_uv", False), ("slow_veg", "lai")):
         t = trained.get(key)
         t = default if t is None else t
         if t != getattr(now, key):
             diffs.append(f"{key}: checkpoint {t!r}, this run {getattr(now, key)!r}")
     if diffs:
         raise ValueError(f"{ckpt_path} was trained with other inputs ({'; '.join(diffs)}); "
-                         "set VPD_SOURCE / USE_VPD_ANOMALY / PERFECT_FORECAST / USE_FRP / USE_BARRA_UV to match")
+                         "set VPD_SOURCE / USE_VPD_ANOMALY / PERFECT_FORECAST / USE_FRP / USE_BARRA_UV / SLOW_VEG to match")
 
 
 class DualWindowDataset(Dataset):
@@ -290,6 +297,13 @@ class DualWindowDataset(Dataset):
         self.vpd_source = str(getattr(cfg, "vpd_source", "montes"))
         self.perfect_forecast = bool(getattr(cfg, "perfect_forecast", False))
         assert self.vpd_source in ("montes", "barra"), self.vpd_source
+        self.slow_veg = str(getattr(cfg, "slow_veg", "lai"))
+        assert self.slow_veg in ("lai", "ndvi", "lai+ndvi"), self.slow_veg
+        if self.slow_veg != "lai":
+            assert self.slow_cube is not None, "slow_veg needs the pre-binned slow cube"
+            ng = open_zarr_root(getattr(cfg, "ndvi_slow_store", "cube_slow_8day_ndvi.zarr"))
+            assert np.array_equal(np.asarray(ng["bin_start_day"][...]), self.slow_bin_start), "NDVI bins differ"
+            self.ndvi_slow = ng["X_slow"]
         self.use_frp = bool(getattr(cfg, "use_frp", False))
         self.use_barra_uv = bool(getattr(cfg, "use_barra_uv", False))
         if self.use_frp:
@@ -760,6 +774,12 @@ class DualWindowDataset(Dataset):
             ).astype(np.float32)
         x_slow = np.nan_to_num(x_slow, nan=0.0, posinf=0.0, neginf=0.0)
         x_slow = (x_slow - self.slow_mean[None, None, None, :]) / self.slow_std[None, None, None, :]
+        ndvi_slow = None
+        if self.slow_veg != "lai":                                  # same bins b_lo..b_end as x_slow
+            nd = np.asarray(self.ndvi_slow[b_lo:b_end, y0:y0 + self.ph, x0:x0 + self.pw, 0], np.float32)
+            ndvi_slow = (np.nan_to_num(nd) - self.x_mean_all[CH["NDVI"]]) / self.x_std_all[CH["NDVI"]]
+            if self.slow_veg == "ndvi":
+                x_slow[..., SLOW_CHANNELS.index("LAI")] = ndvi_slow
 
         # ---- very-slow branch: year-scale accumulated drought ----
         x_vslow = None
@@ -834,6 +854,8 @@ class DualWindowDataset(Dataset):
             slow_days_axis = np.arange(t_end - cfg.slow_days, t_end, cfg.slow_bin)
         fast_days_axis = np.arange(t_end - cfg.fast_days, t_end)
         x_slow = _append_statics(x_slow, self.t_slow, slow_days_axis)
+        if self.slow_veg == "lai+ndvi":
+            x_slow = np.concatenate([x_slow, ndvi_slow[..., None]], axis=-1).astype(np.float32)
         if x_vslow is not None:
             n_v = x_vslow.shape[0]
             v_axis = self.slow_bin_start[b_end-n_v*int(cfg.vslow_bin//cfg.slow_bin):b_end:
@@ -1130,6 +1152,7 @@ class DualDataModule(pl.LightningDataModule):
         use_vpd_anomaly: bool = False,
         use_frp: bool = False,
         use_barra_uv: bool = False,
+        slow_veg: str = "lai",
         vpd_source: str = "montes",
         perfect_forecast: bool = False,
         min_pos_pixels: int = 20,   # scale with patch area to hold fire-DENSITY fixed
@@ -1189,7 +1212,7 @@ class DualDataModule(pl.LightningDataModule):
             past_fire_dist_store=h.past_fire_dist_store,
             use_vpd_anomaly=h.use_vpd_anomaly,
             vpd_source=h.vpd_source, perfect_forecast=h.perfect_forecast,
-            use_frp=h.use_frp, use_barra_uv=h.use_barra_uv,
+            use_frp=h.use_frp, use_barra_uv=h.use_barra_uv, slow_veg=h.slow_veg,
         ))
         self.val_ds = DualWindowDataset(DualPatchConfig(
             zarr_paths=tuple(h.val_paths), stats_path=h.stats_path,
@@ -1215,7 +1238,7 @@ class DualDataModule(pl.LightningDataModule):
             augment=False,   # val is always deterministic/unaugmented, regardless of h.augment
             use_vpd_anomaly=h.use_vpd_anomaly,
             vpd_source=h.vpd_source, perfect_forecast=h.perfect_forecast,
-            use_frp=h.use_frp, use_barra_uv=h.use_barra_uv,
+            use_frp=h.use_frp, use_barra_uv=h.use_barra_uv, slow_veg=h.slow_veg,
             fire_history_dropout_prob=0.0,  # val must see the real fire-history signal always
         ))
 

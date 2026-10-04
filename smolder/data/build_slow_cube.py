@@ -46,14 +46,17 @@ import zarr
 from smolder.data.io import data_dir
 
 SCRIPT_DIR = data_dir()   # cubes are read from / written to $SMOLDER_DATA
-OUT = SCRIPT_DIR / "cube_slow_8day.zarr"
+OUT = SCRIPT_DIR / os.environ.get("OUT_NAME", "cube_slow_8day.zarr")
+WORKERS = int(os.environ.get("WORKERS", 1))
 
 # X channel order: [sm, wind, vpd, precip, lst_day, ndvi, lai]
 CH = {"SM": 0, "WIND": 1, "VPD": 2, "PPT": 3, "LST": 4, "NDVI": 5, "LAI": 6}
 # NDVI excluded: correlates 0.795 with LAI and adds nothing for the target
 # (LAI alone 0.771 AUC, NDVI+LAI 0.770, all three 0.765).
-SLOW_CHANNELS = ("LAI", "SM", "PPT")
-SLOW_AGG = {"LAI": "mean", "SM": "mean", "PPT": "sum"}
+# CHANNELS=NDVI OUT_NAME=cube_slow_8day_ndvi.zarr builds an NDVI-only store on
+# the same bins (zarr_dual_datamodule SLOW_VEG).
+SLOW_CHANNELS = tuple(os.environ.get("CHANNELS", "LAI,SM,PPT").split(","))
+SLOW_AGG = {"LAI": "mean", "SM": "mean", "PPT": "sum", "NDVI": "mean"}
 BIN = 8  # native cadence of LAI (8-day composites)
 
 
@@ -131,13 +134,19 @@ def main():
         return
 
     for b in range(n_bins):
-        t0 = b * bin_days
-        bin_start[b] = t0
-        ci, _ = locate(t0)
+        bin_start[b] = b * bin_days
+        ci, _ = locate(b * bin_days)
         year_of[b] = groups[ci][0]
-        z[b] = compute(b)
-        if b % 10 == 0:
-            print(f"[bin] {b}/{n_bins}  day {t0}  year {year_of[b]}", flush=True)
+
+    def write(b):
+        z[b] = compute(b)                       # one bin = its own chunks, safe in parallel
+        return b
+
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max(1, WORKERS)) as ex:
+        for b in ex.map(write, range(n_bins)):
+            if b % 10 == 0:
+                print(f"[bin] {b}/{n_bins}  day {b * bin_days}  year {year_of[b]}", flush=True)
 
     root.create_dataset("bin_start_day", data=bin_start, overwrite=True)
     root.create_dataset("year_of_bin", data=year_of, overwrite=True)

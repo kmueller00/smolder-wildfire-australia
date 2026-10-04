@@ -106,6 +106,30 @@ def test_vpd_anomaly_channel():
         assert abs(float(b1["x_fast"][j, r, c, -1]) - np.clip(ref, -6, 6)) < 1e-4, (j, ref)
 
 
+def test_slow_veg_ndvi():
+    import json
+    base = _ds()
+    rep = DualWindowDataset(DualPatchConfig(**{**base.cfg.__dict__, "slow_veg": "ndvi"}))
+    add = DualWindowDataset(DualPatchConfig(**{**base.cfg.__dict__, "slow_veg": "lai+ndvi"}))
+    y0, x0, t_end = 1600, 2600, 200
+    b0, br, ba = (d.sample_at(t_end, y0, x0) for d in (base, rep, add))
+    assert torch.equal(br["x_slow"][..., 1:], b0["x_slow"][..., 1:])          # only LAI (channel 0) replaced
+    assert not torch.equal(br["x_slow"][..., 0], b0["x_slow"][..., 0])
+    assert ba["x_slow"].shape[-1] == b0["x_slow"].shape[-1] + 1
+    assert torch.equal(ba["x_slow"][..., :-1], b0["x_slow"])                 # NDVI appended last
+    assert torch.equal(ba["x_slow"][..., -1], br["x_slow"][..., 0])
+    # newest NDVI bin = mean of the cube's NDVI over that bin's 8 days, which end on or before the issue day
+    e = base._slow_bin_end(t_end)
+    start = int(base.slow_bin_start[e - 1])
+    assert start + 7 <= t_end - 1 + OFF_2019
+    cube = open_zarr_root("cube_daily_smgrid_2019.zarr")
+    days = [start + k - OFF_2019 for k in range(8)]
+    nd = np.mean([np.nan_to_num(np.asarray(cube["X"][d, y0:y0 + 128, x0:x0 + 128, 5], np.float32)) for d in days], 0)
+    st = json.load(open(os.path.join(REPO, "smolder", "data", "channel_stats_2015_2018.json")))
+    ref = (nd - st["x_mean"][5]) / st["x_std"][5]
+    assert np.allclose(br["x_slow"][-1, ..., 0].numpy(), ref, atol=1e-4)
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):
