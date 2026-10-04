@@ -139,6 +139,8 @@ def main():
         use_vpd_anomaly=os.environ.get("USE_VPD_ANOMALY", "0") == "1",
         vpd_source=os.environ.get("VPD_SOURCE", "montes"),
         perfect_forecast=os.environ.get("PERFECT_FORECAST", "0") == "1",
+        use_frp=os.environ.get("USE_FRP", "0") == "1",
+        use_barra_uv=os.environ.get("USE_BARRA_UV", "0") == "1",
     )
 
     dm.setup("fit")

@@ -186,6 +186,17 @@ class DualPatchConfig:
     perfect_forecast: bool = field(
         default_factory=lambda: os.environ.get("PERFECT_FORECAST", "0") == "1")
     barra_store: str = "barra_c2_daily.zarr"
+    # VIIRS fire radiative power (firms_daily.zarr, smolder.data.build_firms_daily):
+    # 3 fast-branch channels per step s over the days s-2..s, the same days as
+    # the newest fire-history map: log(1 + summed FRP) / 5, log(1 + number of
+    # detections) / 3, share of night detections. Blanked together with the
+    # fire history by fire_history_dropout_prob.
+    use_frp: bool = field(default_factory=lambda: os.environ.get("USE_FRP", "0") == "1")
+    firms_store: str = "firms_daily.zarr"
+    # BARRA-C2 daily mean 10 m wind components (eastward, northward) of every
+    # fast day as 2 fast-branch channels, normalized with the store's
+    # 2015-2018 statistics. Absolute directions: incompatible with augment.
+    use_barra_uv: bool = field(default_factory=lambda: os.environ.get("USE_BARRA_UV", "0") == "1")
 
 
 def check_checkpoint_inputs(ckpt_path: str) -> None:
@@ -197,14 +208,15 @@ def check_checkpoint_inputs(ckpt_path: str) -> None:
     trained = ck.get("datamodule_hyper_parameters") or {}
     now = DualPatchConfig(zarr_paths=(), stats_path="")
     diffs = []
-    for key, default in (("vpd_source", "montes"), ("use_vpd_anomaly", False), ("perfect_forecast", False)):
+    for key, default in (("vpd_source", "montes"), ("use_vpd_anomaly", False), ("perfect_forecast", False),
+                         ("use_frp", False), ("use_barra_uv", False)):
         t = trained.get(key)
         t = default if t is None else t
         if t != getattr(now, key):
             diffs.append(f"{key}: checkpoint {t!r}, this run {getattr(now, key)!r}")
     if diffs:
         raise ValueError(f"{ckpt_path} was trained with other inputs ({'; '.join(diffs)}); "
-                         "set VPD_SOURCE / USE_VPD_ANOMALY / PERFECT_FORECAST to match")
+                         "set VPD_SOURCE / USE_VPD_ANOMALY / PERFECT_FORECAST / USE_FRP / USE_BARRA_UV to match")
 
 
 class DualWindowDataset(Dataset):
@@ -278,7 +290,13 @@ class DualWindowDataset(Dataset):
         self.vpd_source = str(getattr(cfg, "vpd_source", "montes"))
         self.perfect_forecast = bool(getattr(cfg, "perfect_forecast", False))
         assert self.vpd_source in ("montes", "barra"), self.vpd_source
-        if self.vpd_source == "barra" or self.perfect_forecast:
+        self.use_frp = bool(getattr(cfg, "use_frp", False))
+        self.use_barra_uv = bool(getattr(cfg, "use_barra_uv", False))
+        if self.use_frp:
+            self.firms = open_zarr_root(getattr(cfg, "firms_store", "firms_daily.zarr"))
+        if self.use_barra_uv and getattr(cfg, "augment", False):
+            raise ValueError("use_barra_uv carries absolute wind directions, which flips/rotations do not correct")
+        if self.vpd_source == "barra" or self.perfect_forecast or self.use_barra_uv:
             self.barra = open_zarr_root(getattr(cfg, "barra_store", "barra_c2_daily.zarr"))
             self.barra_lat = np.asarray(self.barra["lat"][...])
             self.barra_lon = np.asarray(self.barra["lon"][...])
@@ -934,6 +952,32 @@ class DualWindowDataset(Dataset):
                 fm[j, :, :, 0], fm[j, :, :, 1] = cache[mi]
             x_fast = np.concatenate([x_fast, fm], axis=-1)
 
+        frp_slice = None
+        if self.use_frp:
+            g_lo = t_end - T - 2 + int(cfg.day_offset)            # step 0 needs s_0-2 .. s_0
+            g_hi = t_end + int(cfg.day_offset)                    # exclusive: step T-1 ends on t_end-1
+            sl = (slice(g_lo, g_hi), slice(y0, y0 + self.ph), slice(x0, x0 + self.pw))
+            frp = np.asarray(self.firms["frp_sum"][sl], np.float32)
+            nd = np.asarray(self.firms["n_det"][sl], np.float32)
+            nn = np.asarray(self.firms["n_night"][sl], np.float32)
+            fr = np.empty((T, self.ph, self.pw, 3), np.float32)
+            for j in range(T):
+                w = slice(j, j + 3)                               # days s_j-2 .. s_j
+                f_, n_, m_ = frp[w].sum(0), nd[w].sum(0), nn[w].sum(0)
+                fr[j, ..., 0] = np.log1p(f_) / 5.0
+                fr[j, ..., 1] = np.log1p(n_) / 3.0
+                fr[j, ..., 2] = np.where(n_ > 0, m_ / np.maximum(n_, 1), 0.0)
+            frp_slice = slice(x_fast.shape[-1], x_fast.shape[-1] + 3)
+            x_fast = np.concatenate([x_fast, fr * lm_p[None, :, :, None]], axis=-1)
+
+        if self.use_barra_uv:
+            g0 = t_end - T + int(cfg.day_offset)
+            bst = self.barra_stats                                # not `st`: that name holds the statics
+            u = np.nan_to_num(self._barra_patch("uas", range(g0, g0 + T), y0, x0))
+            v = np.nan_to_num(self._barra_patch("vas", range(g0, g0 + T), y0, x0))
+            x_fast = np.concatenate([x_fast, ((u - bst["uas"][0]) / bst["uas"][1])[..., None],
+                                     ((v - bst["vas"][0]) / bst["vas"][1])[..., None]], axis=-1)
+
         if self.use_vpd_anomaly:
             x_fast = np.concatenate([x_fast, self._vpd_anomaly(vpd_raw, t_end, y0, x0)[..., None]], axis=-1)
 
@@ -950,6 +994,8 @@ class DualWindowDataset(Dataset):
                 and not cfg.deterministic and self.rng.random() < self.fire_history_dropout_prob):
             i0 = self.fire_hist_start_idx
             x_fast[..., i0:i0 + self.n_fire_hist_channels] = 0.0
+            if frp_slice is not None:
+                x_fast[..., frp_slice] = 0.0
 
         out = {
             "x_slow": torch.from_numpy(np.ascontiguousarray(x_slow)),
@@ -1082,6 +1128,8 @@ class DualDataModule(pl.LightningDataModule):
         min_new_fire_pixels: int = 1,
         past_fire_dist_store: Optional[str] = None,
         use_vpd_anomaly: bool = False,
+        use_frp: bool = False,
+        use_barra_uv: bool = False,
         vpd_source: str = "montes",
         perfect_forecast: bool = False,
         min_pos_pixels: int = 20,   # scale with patch area to hold fire-DENSITY fixed
@@ -1141,6 +1189,7 @@ class DualDataModule(pl.LightningDataModule):
             past_fire_dist_store=h.past_fire_dist_store,
             use_vpd_anomaly=h.use_vpd_anomaly,
             vpd_source=h.vpd_source, perfect_forecast=h.perfect_forecast,
+            use_frp=h.use_frp, use_barra_uv=h.use_barra_uv,
         ))
         self.val_ds = DualWindowDataset(DualPatchConfig(
             zarr_paths=tuple(h.val_paths), stats_path=h.stats_path,
@@ -1166,6 +1215,7 @@ class DualDataModule(pl.LightningDataModule):
             augment=False,   # val is always deterministic/unaugmented, regardless of h.augment
             use_vpd_anomaly=h.use_vpd_anomaly,
             vpd_source=h.vpd_source, perfect_forecast=h.perfect_forecast,
+            use_frp=h.use_frp, use_barra_uv=h.use_barra_uv,
             fire_history_dropout_prob=0.0,  # val must see the real fire-history signal always
         ))
 

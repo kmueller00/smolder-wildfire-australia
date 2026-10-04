@@ -130,6 +130,38 @@ def test_barra_vpd_anomaly_and_forecast_vpd():
         assert np.allclose(b["x_fast"][j, ..., -2].numpy(), (fut - m_) / s_, atol=1e-4)
 
 
+def test_frp_and_barra_uv_channels():
+    base, ds = _ds(), _ds(use_frp=True, use_barra_uv=True)
+    b0, b1 = base.sample_at(T_END, Y0, X0), ds.sample_at(T_END, Y0, X0)
+    C0 = b0["x_fast"].shape[-1]
+    assert b1["x_fast"].shape[-1] == C0 + 5 and torch.equal(b1["x_fast"][..., :C0], b0["x_fast"])
+    T = b1["x_fast"].shape[0]
+    f = open_zarr_root("firms_daily.zarr")
+    land = np.asarray(open_zarr_root("cube_daily_smgrid_2019.zarr")["landmask"][Y0:Y0 + 64, X0:X0 + 64]) > 0
+    for j in (0, T - 1):
+        s_j = T_END - T + j + OFF                                   # global issue day of step j
+        days = slice(s_j - 2, s_j + 1)                              # s_j-2 .. s_j, nothing later
+        frp = np.asarray(f["frp_sum"][days, Y0:Y0 + 64, X0:X0 + 64], np.float32).sum(0)
+        n = np.asarray(f["n_det"][days, Y0:Y0 + 64, X0:X0 + 64], np.float32).sum(0)
+        assert np.allclose(b1["x_fast"][j, ..., C0].numpy(), np.log1p(frp) / 5.0 * land, atol=1e-5)
+        assert np.allclose(b1["x_fast"][j, ..., C0 + 1].numpy(), np.log1p(n) / 3.0 * land, atol=1e-5)
+        st = ds.barra_stats
+        u = ds._barra_patch("uas", [T_END - T + j + OFF], Y0, X0)[0]
+        assert np.allclose(b1["x_fast"][j, ..., C0 + 3].numpy(), (u - st["uas"][0]) / st["uas"][1], atol=1e-4)
+
+
+def test_fire_history_dropout_blanks_frp():
+    ds = DualWindowDataset(DualPatchConfig(
+        zarr_paths=("cube_daily_smgrid_2019.zarr",), stats_path="channel_stats_2015_2018.json",
+        slow_cube_path="cube_slow_8day.zarr", day_offset=OFF, patch_size=64, samples_per_epoch=1,
+        seed=0, deterministic=False, fire_history=True, fire_history_lags=(3, 4, 5),
+        fire_history_distance=True, use_frp=True, fire_history_dropout_prob=1.0))
+    b = ds.sample_at(T_END, Y0, X0)
+    i0 = ds.fire_hist_start_idx
+    assert torch.all(b["x_fast"][..., i0:i0 + ds.n_fire_hist_channels] == 0)
+    assert torch.all(b["x_fast"][..., -3:] == 0)                    # FRP channels blanked too
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):
