@@ -43,6 +43,10 @@ compared with S and with SW (daily-mean wind).
 EXTRA_VEG=1 (default) adds NDVI (MODIS 500 m) and LAI (HiQ-LAI 5 km) at p on
 D from the daily cube: models SN = S + NDVI and SLAI = S + LAI. SMOLDER
 already has LAI, so SLAI - S shows the noise level for this comparison.
+If AGE_STORE (fire_age_continental.zarr) exists, fuel_age_p = days since the
+pixel last burned (read at D-3; no fire since 2015 = elapsed days) is added:
+CA = C + age, SA = S + age, SLA = SLAI + age, SNA = SN + age, so the pairs
+show what fuel age adds beyond the fire maps, SMOLDER, LAI and NDVI.
 
 All inputs end on D. Models are fitted on the odd-numbered issue days and
 evaluated on the even-numbered ones. Sample: every target fire pixel in the
@@ -100,6 +104,16 @@ if EXTRA_VEG:
     MODELS["SN"] = BINARY + ["ndvi_p"] + SL
     MODELS["SLAI"] = BINARY + ["lai_p"] + SL
     PAIRS += [("S", "SN"), ("S", "SLAI"), ("SLAI", "SN")]
+AGE_STORE = os.environ.get("AGE_STORE", "/home/saturn/gwgi/gwgi107h/wildfire_data/firecastnet/fire_age_continental.zarr")
+if os.path.exists(AGE_STORE):
+    ALL = ALL[:-1] + ["fuel_age_p"] + ["smolder_logit"]
+    MODELS["CA"] = BINARY + ["fuel_age_p"]
+    MODELS["SA"] = BINARY + ["fuel_age_p"] + SL
+    if EXTRA_VEG:
+        MODELS["SLA"] = BINARY + ["lai_p", "fuel_age_p"] + SL
+        MODELS["SNA"] = BINARY + ["ndvi_p", "fuel_age_p"] + SL
+        PAIRS += [("SLAI", "SLA"), ("SN", "SNA")]
+    PAIRS += [("C", "CA"), ("S", "SA")]
 if os.path.exists(PM_STORE):
     ALL = ALL[:-1] + PM + ["smolder_logit"]
     MODELS["SPM"] = BINARY + TERRAIN + PM + SL
@@ -133,6 +147,8 @@ def _init():
     G["barra"] = open_zarr_root(BARRA)
     if os.path.exists(PM_STORE):
         G["pm"] = open_zarr_root(PM_STORE)
+    if os.path.exists(AGE_STORE):
+        G["age"] = open_zarr_root(AGE_STORE)["age_px"]
     blat, blon = np.asarray(G["barra"]["lat"]), np.asarray(G["barra"]["lon"])
     G["barra_ij"] = lambda r, c: ((T.f + (r + 0.5) * T.e - blat[0]) / (blat[1] - blat[0]),
                                   (T.c + (c + 0.5) * T.a - blon[0]) / (blon[1] - blon[0]))
@@ -211,6 +227,9 @@ def one_day(D):
     if EXTRA_VEG:                                                   # NDVI / LAI at p on the issue day
         xv = np.asarray(G["X"][D, :, :, 5:7], np.float32)
         f["ndvi_p"], f["lai_p"] = xv[rr, cc, 0], xv[rr, cc, 1]
+    if "age" in G:                                                  # days since p last burned, up to D
+        a_ = np.asarray(G["age"][gD - 3][rr, cc], np.float64)
+        f["fuel_age_p"] = np.where(a_ == 65535, gD - 3 + 1, a_)
     if "pm" in G:                                                   # afternoon (05 UTC) wind of D at q
         pu = map_coordinates(np.asarray(G["pm"]["uas_05"][gD], np.float32), [fi, fj], order=1, mode="nearest")
         pv = map_coordinates(np.asarray(G["pm"]["vas_05"][gD], np.float32), [fi, fj], order=1, mode="nearest")
