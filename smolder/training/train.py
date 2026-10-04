@@ -46,6 +46,12 @@ def main():
     pos_weight = float(os.environ.get("POS_WEIGHT", POS_WEIGHT))
     samples_per_epoch = int(os.environ.get("SAMPLES_PER_EPOCH", SAMPLES_PER_EPOCH))
     max_epochs = int(os.environ.get("MAX_EPOCHS", MAX_EPOCHS))
+    # Early stopping cannot end training before MIN_EPOCHS (0 = off, the
+    # released recipe). The positive weight is annealed over the first 8
+    # epochs and validation AP often peaks early in that phase and dips after
+    # it; with patience 6 a run can then stop at epoch 9-13, before the
+    # climb that follows (seen in the 2026-10 distance-weight sweep).
+    min_epochs = int(os.environ.get("MIN_EPOCHS", 0))
     slow_days = int(os.environ.get("SLOW_DAYS", SLOW_DAYS))
     fast_days = int(os.environ.get("FAST_DAYS", FAST_DAYS))
 
@@ -239,6 +245,7 @@ def main():
 
     trainer = pl.Trainer(
         max_epochs=max_epochs,
+        min_epochs=min_epochs,
         accelerator="gpu",
         devices=1,
         strategy="auto",
