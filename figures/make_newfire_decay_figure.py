@@ -23,8 +23,7 @@ for w, lab, col, sty in SHOW:
     y = np.array([np.nan if v is None else v for v in lift[str(w)]], float)
     axA.plot(RADII, y, sty, color=col, lw=2.0, label=lab)
     axB.plot(RADII, S["share_new_pct"][str(w)], sty, color=col, lw=2.0, label=lab)
-axA.axhline(1.0, color=MUTED, lw=1.2, ls=(0, (4, 3)))
-axA.text(30.5, 1.12, "random", fontsize=8.4, color=MUTED, style="italic")
+axA.axhline(1.0, color=MUTED, lw=1.2, ls=(0, (4, 3)), label="random selection")
 axA.set_yscale("log")
 vals = [v for w, *_ in SHOW for v in lift[str(w)] if v]
 lo, hi = min(min(vals), 1.0) / 2, max(vals) * 2
@@ -46,10 +45,6 @@ for ax in (axA, axB):
     ax.legend(fontsize=8.6, loc="upper right", frameon=True, facecolor="white", edgecolor=MUTED)
 fig.suptitle("New-fire lift depends on how “new” is defined, 2020 hold-out year",
              fontsize=14, fontweight="bold", color=INK, y=1.03)
-fig.text(0.5, -0.05,
-         f"{S['n_patches']} fire-active patches. A fire pixel counts as new if no VIIRS fire was detected within the "
-         "given distance during the stated period up to the issue day.",
-         ha="center", fontsize=9, color=MUTED, style="italic", wrap=True)
 fig.tight_layout()
 fig.savefig(os.path.join(HERE, "fig_newfire_distance_decay.png"), dpi=300, bbox_inches="tight",
             facecolor="white")

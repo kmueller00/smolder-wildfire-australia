@@ -2,9 +2,10 @@
 
 The slow encoder reads the 144-day / 8-day-bin window, the fast encoder the
 14-day daily window. At every fast timestep the fast hidden state queries the
-slow encoder's final state (multi-head cross-attention, per pixel), and a 1x1
-head produces fire logits. The head is applied at every fast timestep (deep
-supervision, auxiliary weight 0.3); predictions use the last timestep.
+slow encoder's final state (multi-head cross-attention, per pixel), and a 5x5
+convolution over the 128 fused channels produces fire logits. The head is
+applied at every fast timestep (deep supervision, auxiliary weight 0.3);
+predictions use the last timestep.
 Training losses, the pos_weight schedule and validation metrics are inherited
 from ConvLSTMLitV2 / ConvLSTMLit.
 """

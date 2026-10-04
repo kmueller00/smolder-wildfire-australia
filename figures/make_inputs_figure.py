@@ -17,14 +17,14 @@ WIDTHS = (0.24, 0.31, 0.16, 0.29)
 
 SECTIONS = [
     ("Slow branch  (144 days as 18 bins of 8 days)", ACCENT, [
-        ("Leaf area index", "HiQ-LAI (Yan et al. 2024)", "8-day", "8-day mean"),
+        ("Leaf area index", "HiQ-LAI (Yan et al. 2024)", "5 km, 8-day", "8-day mean"),
         ("Soil moisture index", "CSIRO SMIPS", "0.01°, daily", "8-day mean"),
         ("Precipitation", "ANUClimate 2.0", "0.01°, daily", "8-day sum"),
     ]),
     ("Fast branch  (14 daily steps)", ACCENT2, [
-        ("Vapour pressure deficit", "ERA5 (Hersbach et al. 2020), at Tmax", "0.25°, daily", "daily value"),
+        ("Vapour pressure deficit", "ERA5-based, at Tmax (Montes et al. 2021)", "31 km, daily", "daily value"),
         ("Land surface temperature", "gap-filled MODIS (Zhang et al. 2022)", "1 km, daily", "daily value"),
-        ("10 m wind speed", "BARRA-C2 reanalysis", "4.4 km, daily", "daily value"),
+        ("10 m wind speed", "BARRA-C2 reanalysis (Su et al. 2024)", "4.4 km, daily mean", "daily value"),
         ("Fire history", "VIIRS 375 m (Schroeder et al. 2014)", "375 m, daily", "3 windows of 3 days up to each day"),
         ("Distance to recent fire", "derived from fire history", "0.01°", "exp(−d / 5 km), per time step"),
     ]),

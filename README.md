@@ -234,8 +234,9 @@ already reaches a cell AUC-PR of 0.37.
   new-fire lift unchanged (13.3× vs 13.6×) and lowered it far from recent
   fire; the fire danger index with fuel moisture gave no gain at all. Likely
   reasons for a genuine plateau: sub-kilometre fuel continuity and ignition
-  sources are averaged away at 1 km, and weather inputs at 4.4 to 25 km resolution
-  varies little between neighbouring pixels.
+  sources are averaged away at 1 km, and the weather inputs, at 4.4 km
+  (wind) to about 31 km (vapour pressure deficit) resolution, vary little
+  between neighbouring pixels.
 - **Labels are satellite detections.** VIIRS misses fires under cloud or
   canopy, small or short-lived fires, and fires between overpasses. Missed
   detections enter as negatives, both as targets and in the fire history.
@@ -325,8 +326,10 @@ figures/        figures and the scripts that draw them
 - Beck, H. E. et al. (2023). High-resolution (1 km) Köppen-Geiger maps for 1901-2099 based on constrained CMIP6 projections. *Scientific Data* 10, 724.
 - Buchhorn, M. et al. (2020). Copernicus Global Land Service: Land Cover 100 m, collection 3.
 - Hersbach, H. et al. (2020). The ERA5 global reanalysis. *Quarterly Journal of the Royal Meteorological Society* 146, 1999-2049.
+- Montes, C., Schulthess, U., Lashkari, A. (2021). An ERA5-based global dataset of vapor pressure deficit at maximum air temperature over land. CIMMYT Research Data & Software Repository Network, V1. https://hdl.handle.net/11529/10548556
 - Schroeder, W. et al. (2014). The New VIIRS 375 m active fire detection data product. *Remote Sensing of Environment* 143, 85-96.
-- Yan, K. et al. (2024). HiQ-LAI: a high-quality reprocessed MODIS leaf area index dataset with better spatiotemporal consistency from 2000 to 2022. *Earth System Science Data* 16.
+- Su, C.-H. et al. (2024). BARRA-C2: Development of the kilometre-scale downscaled atmospheric reanalysis over Australia. Bureau Research Report 097, Bureau of Meteorology, Australia.
+- Yan, K., Wang, J., Peng, R., Yang, K., Chen, X., Yin, G., Dong, J., Weiss, M., Pu, J., Myneni, R. B. (2024). HiQ-LAI: a high-quality reprocessed MODIS leaf area index dataset with better spatiotemporal consistency from 2000 to 2022. *Earth System Science Data* 16, 1601-1622. https://doi.org/10.5194/essd-16-1601-2024
 - Zhang, T., Zhou, Y., Zhu, Z., Li, X., Asrar, G. R. (2022). A global seamless 1 km resolution daily land surface temperature dataset (2003-2020). *Earth System Science Data* 14, 651-664.
 
 Each input dataset remains under its provider's licence.

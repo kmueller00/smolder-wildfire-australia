@@ -18,7 +18,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
-from matplotlib.patches import Patch
+from matplotlib.patches import Patch, Rectangle
 from matplotlib.ticker import FuncFormatter, MultipleLocator
 
 from style_smolder import GRID_COLOR, INK, MUTED, PANEL_BG, SPINE_COLOR
@@ -117,10 +117,56 @@ def _style_map(ax):
         ax.spines[side].set_color(SPINE_COLOR)
 
 
+COAST = "#1F1F22"
+LOCATOR = "#E3001B"          # patch outline in the locator inset
+INSET_LAND = "#F4F1EA"
+INSET_W = 0.30                      # inset width as a fraction of the panel width
+
+
+def _coastline(ax, land, ext, lw, z):
+    if land.all():
+        return
+    ax.contour(land.astype(float), levels=[0.5], colors=COAST, linewidths=lw,
+               extent=ext, origin="upper", zorder=z)
+
+
+def _locator(ax, nat, y0, x0, yy, xx):
+    """Inset map of Australia marking the patch, placed in the free corner
+    (upper left, upper right or lower right) that covers the fewest fire pixels."""
+    land, down = nat["land"], int(nat["down"])
+    H, W = land.shape
+    iw = INSET_W
+    ih = iw * H / W                         # panels are square, so keep the map's aspect
+    corners = {"upper left": (0.02, 0.98 - ih), "upper right": (0.98 - iw, 0.98 - ih),
+               "lower right": (0.98 - iw, 0.02)}
+    fx, fy = (xx + 0.5) / PATCH, 1.0 - (yy + 0.5) / PATCH          # fire in axes fractions
+    cover = {k: int(((fx >= cx) & (fx <= cx + iw) & (fy >= cy) & (fy <= cy + ih)).sum())
+             for k, (cx, cy) in corners.items()}
+    cx, cy = corners[min(cover, key=cover.get)]
+    ins = ax.inset_axes([cx, cy, iw, ih], zorder=6)
+    ext = [LON0, LON0 + W * down * PX, LAT0 - H * down * PX, LAT0]
+    ins.set_facecolor(OCEAN)
+    ins.imshow(np.where(land, 1.0, np.nan), extent=ext,
+               cmap=LinearSegmentedColormap.from_list("l", [INSET_LAND, INSET_LAND]),
+               interpolation="nearest", zorder=1)
+    ins.contour(land.astype(float), levels=[0.5], colors=COAST, linewidths=0.5,
+                extent=ext, origin="upper", zorder=2)
+    ins.add_patch(Rectangle((LON0 + x0 * PX, LAT0 - (y0 + PATCH) * PX), PATCH * PX, PATCH * PX,
+                            facecolor="none", edgecolor=LOCATOR, lw=1.3, zorder=3))
+    ins.set_xlim(ext[0], ext[1]); ins.set_ylim(ext[2], ext[3]); ins.set_aspect("equal")
+    ins.set_xticks([]); ins.set_yticks([])
+    for sp in ins.spines.values():
+        sp.set_edgecolor(MUTED); sp.set_linewidth(0.6)
+
+
 def plot():
     d = np.load(CACHE)
+    nat = np.load(os.path.join(HERE, "..", "results", "national_2020_maps.npz"))
     n = int(d["n"])
-    fig, axes = plt.subplots(n, 2, figsize=(10.2, 4.75 * n + 1.3), facecolor="white")
+    nrow = (n + 1) // 2                     # two forecasts per row, each as observed | predicted
+    fig = plt.figure(figsize=(19.6, 4.75 * nrow + 1.3), facecolor="white")
+    gs = fig.add_gridspec(nrow, 5, width_ratios=[1, 1, 0.1, 1, 1])
+    axes = np.array([[fig.add_subplot(gs[i // 2, 3 * (i % 2) + c]) for c in (0, 1)] for i in range(n)])
     for r in range(n):
         pct = d[f"pct_{r}"].astype(np.float32)
         prob = d[f"prob_{r}"]
@@ -145,6 +191,8 @@ def plot():
                   interpolation="nearest", zorder=0)
         ax.scatter(fx[~hit], fy[~hit], s=2.2, c=FIRE_MISS, marker="s", linewidths=0, zorder=3)
         ax.scatter(fx[hit], fy[hit], s=2.2, c=FIRE_HIT, marker="s", linewidths=0, zorder=3)
+        _coastline(ax, land, ext, 0.9, 3.5)
+        _locator(ax, nat, y0, x0, yy, xx)
         ax.set_title(f"Observed fire, 3 days after {date}", fontsize=10.5,
                      fontweight="bold", color=INK, pad=6)
         ax.text(0.025, 0.04, f"{nfire} fire pixels", transform=ax.transAxes, fontsize=8.5,
@@ -161,6 +209,7 @@ def plot():
                     extent=ext, origin="upper", zorder=3)
         ax.contour(top1.astype(float), levels=[0.5], colors=HATCH, linewidths=0.6,
                    extent=ext, origin="upper", zorder=3)
+        _coastline(ax, land, ext, 0.9, 4.5)
         ax.scatter(fx[~hit], fy[~hit], s=1.6, c=FIRE_MISS, marker="s", linewidths=0, zorder=4)
         ax.scatter(fx[hit], fy[hit], s=1.6, c=FIRE_HIT, marker="s", linewidths=0, zorder=4)
         ax.set_title(f"SMOLDER risk, issued {date}", fontsize=10.5, fontweight="bold",
@@ -175,8 +224,8 @@ def plot():
             axes[r, c].set_aspect("equal")
             _style_map(axes[r, c])
 
-    fig.subplots_adjust(left=0.08, right=0.98, top=0.955, bottom=0.085, hspace=0.2, wspace=0.18)
-    cax = fig.add_axes([0.56, 0.045, 0.40, 0.011])
+    fig.subplots_adjust(left=0.05, right=0.99, top=0.92, bottom=0.12, hspace=0.22, wspace=0.2)
+    cax = fig.add_axes([0.60, 0.06, 0.36, 0.018])
     cb = fig.colorbar(im, cax=cax, orientation="horizontal")
     cb.set_label("Predicted risk, percentile within the patch", fontsize=9, color=INK)
     cb.ax.tick_params(labelsize=8, colors=INK)
@@ -184,11 +233,12 @@ def plot():
     handles = [Patch(facecolor=FIRE_HIT, label="Observed fire inside the top-1% area"),
                Patch(facecolor=FIRE_MISS, label="Observed fire outside it"),
                Patch(facecolor="none", edgecolor=HATCH, hatch="////", label="Top-1% risk area"),
-               Patch(facecolor=OCEAN, label="Ocean")]
-    fig.legend(handles=handles, loc="lower left", bbox_to_anchor=(0.06, 0.028), ncol=2,
+               Patch(facecolor=OCEAN, label="Ocean"),
+               Patch(facecolor="none", edgecolor=LOCATOR, lw=1.3, label="Location of the patch (inset)")]
+    fig.legend(handles=handles, loc="lower left", bbox_to_anchor=(0.05, 0.02), ncol=3,
                fontsize=8.6, frameon=True, facecolor="white", edgecolor=MUTED)
     fig.suptitle("Observed fire vs predicted risk, 2020 hold-out year",
-                 fontsize=13.5, fontweight="bold", color=INK, y=0.99)
+                 fontsize=14, fontweight="bold", color=INK, y=0.995)
     fig.savefig(OUT, dpi=250, bbox_inches="tight", facecolor="white")
     print("wrote", OUT)
 

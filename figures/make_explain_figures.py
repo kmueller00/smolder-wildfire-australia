@@ -2,9 +2,10 @@
 
   python make_explain_figures.py --summarize PIXELS.csv.gz
         condenses the per-pixel sample into results/explain_2020_summary.json
-  python make_explain_figures.py
-        draws fig_explain_importance.png, fig_explain_conditions.png and
-        fig_explain_prefire.png from results/explain_2020*.json
+  python make_explain_figures.py [--pixels PIXELS.csv.gz]
+        draws fig_explain_importance.png and fig_explain_prefire.png from
+        results/explain_2020*.json, and fig_explain_conditions.png (violins)
+        from the per-pixel sample when --pixels is given
 """
 import json
 import os
@@ -103,60 +104,85 @@ def importance():
             s.set_visible(False)
         ax.tick_params(length=0)
     fig.suptitle("What decides the top-1 % risk area", fontsize=14, fontweight="bold", color=INK, y=1.02)
-    fig.text(0.5, -0.06,
-             f"{E['n_patches']} fire-active 384 px patches of 2020. Each input group is shuffled across the land pixels "
-             "of a patch (same shuffle at every time step). Values: share of the original top-1 % pixels that leave "
-             f"the top 1 % (%). Error bars: largest standard deviation over {E['n_fold']} temporal or "
-             f"{E['n_fold']} spatial folds.", ha="center", fontsize=8.8, color=MUTED, style="italic", wrap=True)
     fig.savefig(os.path.join(HERE, "fig_explain_importance.png"), dpi=250, bbox_inches="tight", facecolor="white")
     print("wrote fig_explain_importance.png")
 
 
-def conditions():
-    S = json.load(open(os.path.join(RES, "explain_2020_summary.json")))
-    fig = new_figure((16.0, 8.4))
+OUTCOMES = [("hit", "TP", "true positive (flagged, burned)", "#0E8C6E"),
+            ("false_alarm", "FP", "false positive (flagged, no fire)", "#DB8A0A"),
+            ("miss", "FN", "false negative (not flagged, burned)", "#C2185B"),
+            ("background", "TN", "true negative (not flagged, no fire)", "#7A869A")]
+DIST_CAP = 70.0
+
+
+def conditions(pixels):
+    """Violins of the issue-day conditions per forecast outcome and climate zone,
+    from the per-pixel sample written by smolder.evaluation.explain_topk."""
+    import pandas as pd
+    from scipy.stats import gaussian_kde
+    cols = ["cls", "climate"] + [v for v, _ in SCALARS]
+    p = pd.read_csv(pixels, usecols=cols)
+    p.loc[p.dist_recent_fire_km.isna(), "dist_recent_fire_km"] = DIST_CAP
+    rng = np.random.default_rng(0)
+    group_w, half = 1.0, 0.105                 # climate group spacing, max violin half-width
+    offs = (np.arange(len(OUTCOMES)) - 1.5) * 0.23
+
+    fig = new_figure((16.0, 9.0))
     for k, (var, label) in enumerate(SCALARS):
         ax = fig.add_subplot(2, 3, k + 1)
-        width = 0.18
-        for ci, cls in enumerate(CLASSES):
-            for gi, clim in enumerate(CLIMATES):
-                q = S["scalars"][var].get(f"{cls}|{clim}")
-                if q is None:
+        pooled = p[var].dropna().values
+        lo, hi = np.percentile(pooled, [1, 99])
+        pad = 0.04 * (hi - lo)
+        for gi, clim in enumerate(CLIMATES):
+            for oi, (cls, short, _, col) in enumerate(OUTCOMES):
+                v = p.loc[(p.cls == cls) & (p.climate == clim), var].dropna().values
+                if v.size < 20:
                     continue
-                x = gi + (ci - 1.5) * width
-                ax.add_patch(plt.Rectangle((x - width * 0.4, q[0]), width * 0.8, q[2] - q[0],
-                                           color=CLASS_COLOR[cls], alpha=0.35, lw=0, zorder=3))
-                ax.plot([x - width * 0.4, x + width * 0.4], [q[1], q[1]], color=CLASS_COLOR[cls], lw=2.4, zorder=4)
-        ax.set_xticks(range(len(CLIMATES))); ax.set_xticklabels(CLIMATES)
-        ax.set_xlim(-0.6, len(CLIMATES) - 0.4)
-        lo = min(q[0] for q in S["scalars"][var].values()); hi = max(q[2] for q in S["scalars"][var].values())
-        ax.set_ylim(max(0, lo - 0.05 * (hi - lo)), hi + 0.08 * (hi - lo))
+                x0 = gi * group_w + offs[oi]
+                p01, p99 = np.percentile(v, [1, 99])     # violin cut at the group's own 1st-99th percentile
+                a, b = max(p01, lo - pad), min(p99, hi + pad)
+                if b > a and np.ptp(v) > 0:
+                    sub = v if v.size <= 20000 else rng.choice(v, 20000, replace=False)
+                    ys = np.linspace(a, b, 200)
+                    dens = gaussian_kde(sub)(ys)
+                    w = half * dens / dens.max()
+                    ax.fill_betweenx(ys, x0 - w, x0 + w, color=col, alpha=0.45, lw=0, zorder=3)
+                    ax.plot(np.r_[x0 - w, (x0 + w)[::-1], x0 - w[0]], np.r_[ys, ys[::-1], ys[0]],
+                            color=col, lw=0.7, zorder=3)
+                q1, med, q3 = np.percentile(v, [25, 50, 75])
+                ax.plot([x0, x0], [q1, q3], color=INK, lw=1.0, zorder=4)
+                ax.plot([x0 - half * 0.7, x0 + half * 0.7], [med, med], color=col, lw=2.6, zorder=5,
+                        solid_capstyle="butt")
+                ax.text(x0, -0.025, short, transform=ax.get_xaxis_transform(), ha="center", va="top",
+                        fontsize=8, color=col, fontweight="bold")
+        ax.set_xlim(-0.55, (len(CLIMATES) - 1) * group_w + 0.55)
+        ax.set_ylim(lo - pad, hi + pad)
+        ax.set_xticks([gi * group_w for gi in range(len(CLIMATES))])
+        ax.set_xticklabels(CLIMATES, fontsize=9.5)
+        ax.tick_params(axis="x", pad=24, length=0)
         ax.set_title(label, fontsize=10.5, fontweight="bold", color=INK, loc="left")
         style_axes(ax, grid_x=False)
-    handles = [plt.Rectangle((0, 0), 1, 1, color=CLASS_COLOR[c], alpha=0.6) for c in CLASSES]
-    fig.legend(handles, [CLASS_LABEL[c] for c in CLASSES], loc="lower center", ncol=4, fontsize=10,
-               frameon=True, facecolor="white", edgecolor=MUTED, bbox_to_anchor=(0.5, -0.02))
-    fig.suptitle("Conditions on the issue day: flagged and burned pixels compared", fontsize=14,
-                 fontweight="bold", color=INK, y=1.0)
-    fig.text(0.5, -0.07, f"Pixel sample from the same patches ({S['n_pixels']:,} pixels). Line: median; box: "
-             "interquartile range. Distances beyond 70 km are shown as 70 km (outside the fire-history feature's range).",
-             ha="center", fontsize=8.8, color=MUTED, style="italic")
-    fig.tight_layout(rect=(0, 0.04, 1, 1))
+    handles = [plt.Rectangle((0, 0), 1, 1, facecolor=c, alpha=0.6, edgecolor=c) for *_, c in OUTCOMES]
+    fig.legend(handles, [f"{s}: {lbl}" for _, s, lbl, _ in OUTCOMES], loc="lower center", ncol=2,
+               fontsize=10, frameon=True, facecolor="white", edgecolor=MUTED, bbox_to_anchor=(0.5, -0.03))
+    fig.suptitle("Conditions on the issue day by forecast outcome", fontsize=14, fontweight="bold",
+                 color=INK, y=1.0)
+    fig.tight_layout(rect=(0, 0.06, 1, 1), h_pad=2.6)
     fig.savefig(os.path.join(HERE, "fig_explain_conditions.png"), dpi=250, bbox_inches="tight", facecolor="white")
     print("wrote fig_explain_conditions.png")
+    return p
 
 
 def prefire():
     S = json.load(open(os.path.join(RES, "explain_2020_summary.json")))["trajectories"]
     lcs = [lc for lc in LANDCOVERS if all(f"{f}|{lc}" in S["sm"] for f in ("fire", "no fire"))]
-    fig = new_figure((16.0, 3.3 * len(lcs) + 0.8))
+    fig = new_figure((16.0, 2.6 * len(lcs) + 0.8))
     for r, lc in enumerate(lcs):
         for c, (prefix, n, label, step) in enumerate(TRAJ):
             ax = fig.add_subplot(len(lcs), len(TRAJ), r * len(TRAJ) + c + 1)
             x = -(np.arange(n)[::-1]) * step - (step if step > 1 else 0)
             for f, col, ls in (("fire", ACCENT2, "-"), ("no fire", ACCENT, "--")):
                 t = S[prefix][f"{f}|{lc}"]
-                ax.fill_between(x, t["q25"], t["q75"], color=col, alpha=0.18, lw=0, zorder=2)
                 ax.plot(x, t["q50"], ls, color=col, lw=2.0, zorder=3, label="burned" if f == "fire" else "did not burn")
             ax.set_xlim(x[0], x[-1])
             if r == 0:
@@ -170,9 +196,6 @@ def prefire():
                 ax.legend(fontsize=8.8, loc="upper left", frameon=True, facecolor="white", edgecolor=MUTED)
     fig.suptitle("What precedes fire: inputs over the model's look-back window, by land cover", fontsize=14,
                  fontweight="bold", color=INK, y=1.0)
-    fig.text(0.5, -0.01, "Median and interquartile range of pixels that burned in the next 3 days (hit or miss) "
-             "and of randomly drawn pixels that did not, in the same patches and days.", ha="center",
-             fontsize=8.8, color=MUTED, style="italic")
     fig.tight_layout(rect=(0, 0.01, 1, 0.99))
     fig.savefig(os.path.join(HERE, "fig_explain_prefire.png"), dpi=220, bbox_inches="tight", facecolor="white")
     print("wrote fig_explain_prefire.png")
@@ -183,5 +206,8 @@ if __name__ == "__main__":
         summarize(sys.argv[sys.argv.index("--summarize") + 1])
     else:
         importance()
-        conditions()
+        if "--pixels" in sys.argv:
+            conditions(sys.argv[sys.argv.index("--pixels") + 1])
+        else:
+            print("skipped fig_explain_conditions.png (needs --pixels explain_2020_pixels.csv.gz)")
         prefire()

@@ -21,8 +21,7 @@ ax = fig.add_subplot(111)
 ax.plot(KS, LIFT_ALL, "-", color=ACCENT, lw=2.2, label="All fire", zorder=4)
 ax.plot(KS, LIFT_NEW, "-", color=ACCENT2, lw=2.2,
         label="New fire (> 3 px from fire in the history window)", zorder=4)
-ax.axhline(1.0, color=MUTED, lw=1.3, ls=(0, (4, 3)), zorder=2)
-ax.text(0.0105, 1.12, "random", fontsize=8.6, color=MUTED, style="italic")
+ax.axhline(1.0, color=MUTED, lw=1.3, ls=(0, (4, 3)), zorder=2, label="random selection")
 
 i5 = int(np.argmin(np.abs(KS - 0.5)))
 for arr, col, dy in ((LIFT_ALL, ACCENT, 2.2), (LIFT_NEW, ACCENT2, 0.42)):
@@ -45,11 +44,6 @@ style_axes(ax)
 ax.legend(fontsize=9.5, loc="upper right", frameon=True, facecolor="white", edgecolor=MUTED)
 ax.set_title("Lift by predicted-risk rank, 2020 hold-out year", fontsize=13.5,
              fontweight="bold", color=INK, pad=12)
-fig.text(0.5, -0.04,
-         f"Mean over {R['n_patches']} fire-active 384 px patches (≥ {R['min_fire_px_per_patch']} fire pixels each). "
-         f"Flagging the top 0.5% of a patch captures on average {100*TPR_ALL[i5]:.0f}% of its fire. "
-         f"New fire is {100*R['new_fire_share']:.0f}% of all fire pixels.",
-         ha="center", fontsize=8.8, color=MUTED, style="italic", wrap=True)
 fig.tight_layout()
 fig.savefig(os.path.join(HERE, "fig_lift_curve.png"), dpi=300, bbox_inches="tight", facecolor="white")
 print("wrote fig_lift_curve.png")

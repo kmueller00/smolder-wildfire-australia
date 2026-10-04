@@ -1,4 +1,4 @@
-"""SMOLDER overview figure with real input rasters.
+"""SMOLDER architecture figure.
 
 Two steps:
   python make_smolder_architecture.py --extract   reads the data cubes (SMOLDER_DATA)
@@ -6,10 +6,11 @@ Two steps:
                                                   writes data/architecture_patch.npz
   python make_smolder_architecture.py             draws the figure from that file
 
-The patch is a fire-active 384 x 384 px window on the issue day 2020-11-15.
-Every stack shows all time slices the model uses (18 slow bins, 14 fast
-days, 3 fire-history windows). The output stack has one map per fast time
-step: the model's risk maps when a checkpoint was available at extraction,
+The figure shows the two ConvLSTM encoders, the fusion and the output head
+with the tensor shape at every stage; the inputs themselves are shown in the
+input-tensor figure. The output stack is real data for a fire-active
+384 x 384 px window on the issue day 2020-11-15, one map per fast time step:
+the model's risk maps when a checkpoint was available at extraction,
 otherwise the observed target for the same steps.
 """
 import os
@@ -183,119 +184,99 @@ def label(ax, x, y, text, **kw):
     ax.text(x, y, text, ha="center", va="top", linespacing=1.25, **kw)
 
 
+def box(ax, x, y, w, h, ec, lines, lw=1.6):
+    """Plain rectangle with centred text lines given as (text, fontsize, bold, colour)."""
+    rect(ax, x, y, w, h, ec=ec, fc="white", lw=lw, z=3)
+    n = len(lines)
+    for i, (t, fs, bold, col) in enumerate(lines):
+        yy = y + h / 2 + (n - 1) / 2 * 3.0 - i * 3.0
+        ax.text(x + w / 2, yy, t, ha="center", va="center", fontsize=fs, color=col,
+                fontweight="bold" if bold else "normal", zorder=4)
+
+
+def path(ax, pts, c, lw=1.4):
+    """Polyline with an arrow head on the last segment."""
+    xs, ys = zip(*pts)
+    ax.plot(xs[:-1] + (xs[-2],), ys[:-1] + (ys[-2],), color=c, lw=lw, zorder=6, solid_capstyle="butt")
+    arrow(ax, xs[-2], ys[-2], xs[-1], ys[-1], c=c, lw=lw)
+
+
 def draw():
     global LAND
     d = np.load(CACHE, allow_pickle=False)
     LAND = np.asarray(d["land"])
-    fig, ax = plt.subplots(figsize=(17.0, 8.9))
-    ax.set_xlim(0, 170)
-    ax.set_ylim(-5, 86)
+    fig, ax = plt.subplots(figsize=(12.6, 7.4))
+    ax.set_xlim(0, 126)
+    ax.set_ylim(7, 81)
     ax.axis("off")
     fig.patch.set_facecolor("white")
 
-    for tag, (x, w, title) in {"a": (1, 76, "Input"), "b": (79, 36, "ConvLSTM encoders"),
-                               "c": (117, 25, "Fusion"), "d": (144, 25, "Output")}.items():
-        rect(ax, x, 1, w, 83, lw=1.3, z=0)
-        ax.text(x + 1.2, 81.6, f"({tag})  {title}", fontsize=11.5, fontweight="bold",
+    for tag, (x, w, title) in {"a": (23, 40, "ConvLSTM encoders"), "b": (65, 33, "Fusion"),
+                               "c": (100, 25, "Output")}.items():
+        rect(ax, x, 8, w, 72, lw=1.3, z=0)
+        ax.text(x + 1.2, 78.6, f"({tag})  {title}", fontsize=11.5, fontweight="bold",
                 color=INK, va="top", ha="left")
+    ax.text(1.0, 78.6, "Inputs", fontsize=11.5, fontweight="bold", color=INK, va="top", ha="left")
 
-    # ---- (a) slow branch
-    ax.text(3, 75.5, "Slow branch", fontsize=10.5, fontweight="bold", color=ACCENT, va="top")
-    ax.text(3, 72.6, "144 days as 18 bins of 8 days", fontsize=8.8, color=MUTED, va="top")
-    for i, (k, lab, cm) in enumerate((("lai", "Leaf area index", "Greens"),
-                                      ("sm", "Soil moisture", "YlGnBu"),
-                                      ("ppt", "Precipitation", "Blues"))):
-        lo, hi = rng(d[k])
-        c = stack(ax, d[k], 4 + i * 23.5, 51.5, 12.0, with_bad(cm), lo, hi)
-        label(ax, c, 50.0, lab)
-
-    # ---- (a) fast branch
-    ax.text(3, 43.5, "Fast branch", fontsize=10.5, fontweight="bold", color=ACCENT2, va="top")
-    ax.text(3, 40.6, "14 daily steps", fontsize=8.8, color=MUTED, va="top")
-    for i, (k, lab, cm) in enumerate((("vpd", "Vapour pressure\ndeficit", "YlOrRd"),
-                                      ("lst", "Land surface\ntemperature", "magma"),
-                                      ("wind", "Wind speed", "cividis"))):
-        lo, hi = rng(d[k])
-        c = stack(ax, d[k], 4 + i * 18.0, 21.5, 10.2, with_bad(cm), lo, hi)
-        label(ax, c, 20.0, lab)
-    fire_cm = ListedColormap(["#F2F2F4", "#B2182B"])
-    fire_cm.set_bad(OCEAN)
-    fh = np.where(d["land"][None], np.asarray(d["fire_hist"], np.float32), np.nan)
-    c = stack(ax, fh, 58.5, 21.5, 10.2, fire_cm, 0, 1)
-    label(ax, c, 20.0, "Fire history\n(VIIRS)")
-
-    # ---- (a) static layers
-    ax.text(3, 10.6, "Static layers", fontsize=10.0, fontweight="bold", color=STATIC, va="top")
-    ax.text(3, 7.7, "added to both branches", fontsize=8.8, color=MUTED, va="top")
-    for i, (k, lab, cm) in enumerate((("agb", "Biomass", "YlGn"), ("landcover", "Land cover", "tab20"),
-                                      ("koppen", "Climate zone", "tab20b"))):
-        a = np.asarray(d[k], np.float32)
-        if k != "agb":
-            a = np.where(a > 0, a, np.nan)
-        lo, hi = rng(a, 0, 100)
-        x0 = 44 + i * 11.0
-        ax.imshow(a, extent=[x0, x0 + 7.5, 3.0, 10.5], cmap=with_bad(cm), vmin=lo, vmax=hi,
-                  interpolation="nearest", zorder=3)
-        rect(ax, x0, 3.0, 7.5, 7.5, ec="#555558", lw=0.6, z=4)
-        coast(ax, x0, 3.0, 7.5, 5)
-        ax.text(x0 + 3.75, 11.4, lab, ha="center", fontsize=8.0, color=INK)
-
-    # ---- (b) unrolled ConvLSTM chains
-    xs = [82.0, 93.8, 105.6]
-    for yc, col, steps in ((62.0, ACCENT, "18 steps"), (30.0, ACCENT2, "14 steps")):
+    # ---- inputs and (a) unrolled ConvLSTM chains
+    xs = [27.0, 38.8, 50.6]
+    chains = ((62.0, ACCENT, "Slow-branch input", "(18, 384, 384, 17)", "18 steps of 8-day averages",
+               "18 steps, 5 × 5 kernels, 64 channels"),
+              (30.0, ACCENT2, "Fast-branch input", "(14, 384, 384, 21)", "14 daily steps",
+               "14 steps, 5 × 5 kernels, 64 channels"))
+    for yc, col, name, shape, sub, steps in chains:
+        box(ax, 1.0, yc - 17.0, 20.0, 13.0, col, [(name, 8.8, True, col), (shape, 8.6, False, INK),
+                                                  (sub, 7.6, False, INK)])
+        feed = yc - 10.5
+        ax.plot([21.0, xs[-1] + 4.0], [feed, feed], color=col, lw=1.1, zorder=5)
         for j, xc in enumerate(xs):
             rect(ax, xc, yc - 4.2, 8.0, 8.4, ec=col, fc="white", lw=1.6, z=3)
             ax.text(xc + 4.0, yc + 0.9, "ConvLSTM", ha="center", va="center", fontsize=6.6,
                     color=col, fontweight="bold", zorder=4)
             ax.text(xc + 4.0, yc - 1.7, "cell", ha="center", va="center", fontsize=6.8, color=col, zorder=4)
-            arrow(ax, xc + 4.0, yc - 9.5, xc + 4.0, yc - 4.3, c=col, lw=1.1)
-            ax.text(xc + 4.0, yc - 10.4, ["x (t−2)", "x (t−1)", "x (t)"][j], ha="center",
-                    va="top", fontsize=7.4, color=MUTED)
+            arrow(ax, xc + 4.0, feed, xc + 4.0, yc - 4.3, c=col, lw=1.1)
+            ax.text(xc + 4.6, feed + 1.0, ["x (t−2)", "x (t−1)", "x (t)"][j], ha="left",
+                    va="bottom", fontsize=7.0, color=INK)
             if j < 2:
                 arrow(ax, xc + 8.0, yc, xs[j + 1], yc, c=col, lw=1.3)
-                ax.text(xc + 9.9, yc + 1.0, "h, c", ha="center", fontsize=6.8, color=MUTED)
-        ax.text(97.8, yc + 6.4, f"{steps}, 5 {TIMES} 5 kernels, 64 channels", ha="center",
-                fontsize=8.2, color=INK)
-    arrow(ax, 77.0, 58.0, 81.8, 62.0, c=ACCENT)
-    arrow(ax, 77.0, 28.0, 81.8, 30.0, c=ACCENT2)
+                ax.text(xc + 9.9, yc + 1.0, "h, c", ha="center", fontsize=6.8, color=INK)
+        ax.text(42.8, yc + 6.4, steps, ha="center", fontsize=8.2, color=INK)
+    ax.text(43.0, 70.6, "final hidden state (384, 384, 64)", ha="center", fontsize=7.8, color=ACCENT)
+    ax.text(43.0, 15.2, "hidden state at every step (14, 384, 384, 64)", ha="center", fontsize=7.8,
+            color=ACCENT2)
 
-    # ---- (c) fusion: one block, attention and output head side by side
-    rect(ax, 118.5, 36.0, 22.0, 20.0, ec=FUSE, fc="white", lw=1.8, z=3)
-    ax.plot([129.5, 129.5], [37.5, 54.5], color="#B9A6E6", lw=0.9, zorder=4)
-    ax.text(124.0, 51.4, "Cross\nattention", ha="center", va="center", fontsize=8.8,
-            fontweight="bold", color=FUSE, linespacing=1.15, zorder=4)
-    ax.text(124.0, 44.2, "4 heads,\nper pixel", ha="center", va="center", fontsize=7.6, color=INK, zorder=4)
-    ax.text(135.0, 51.4, f"1 {TIMES} 1\nconv", ha="center", va="center", fontsize=8.8,
-            fontweight="bold", color=INK, linespacing=1.15, zorder=4)
-    ax.text(135.0, 44.2, "sigmoid", ha="center", va="center", fontsize=7.6, color=INK, zorder=4)
-    arrow(ax, 128.0, 47.0, 131.6, 47.0, lw=1.1)
-    arrow(ax, 113.6, 62.0, 122.0, 56.2, c=ACCENT)
-    ax.text(118.2, 64.6, "K, V", fontsize=8.4, color=ACCENT, fontweight="bold")
-    ax.text(118.2, 62.4, "final slow state", fontsize=7.2, color=MUTED, va="top")
-    arrow(ax, 113.6, 30.0, 122.0, 35.8, c=ACCENT2)
-    ax.text(118.2, 30.6, "Q", fontsize=8.4, color=ACCENT2, fontweight="bold", va="top")
-    ax.text(118.2, 28.2, "fast state,\nevery step", fontsize=7.2, color=MUTED, va="top", linespacing=1.2)
-    ax.text(129.5, 22.0, "Applied at every fast time\nstep; the last step is\nthe forecast",
-            ha="center", va="top", fontsize=7.6, color=MUTED)
+    # ---- (b) fusion: attention, concatenation, output head
+    bx, bw = 68.5, 26.0
+    box(ax, bx, 50.0, bw, 15.0, FUSE, [("Cross-attention", 9.2, True, FUSE), ("4 heads, per pixel", 8.0, False, INK),
+                                        ("+ residual, layer norm", 8.0, False, INK)], lw=1.8)
+    box(ax, bx, 34.0, bw, 10.5, FUSE, [("Concatenate", 9.2, True, FUSE), ("(14, 384, 384, 128)", 8.4, False, INK)],
+        lw=1.8)
+    box(ax, bx, 17.0, bw, 10.5, INK, [(f"5 {TIMES} 5 conv, sigmoid", 9.2, True, INK),
+                                       ("(14, 384, 384)", 8.4, False, INK)], lw=1.8)
+    arrow(ax, bx + bw / 2, 50.0, bx + bw / 2, 44.6)
+    arrow(ax, bx + bw / 2, 34.0, bx + bw / 2, 27.6)
+    ax.text(bx + bw / 2, 15.0, "applied at every fast step;\nthe last step is the forecast",
+            ha="center", va="top", fontsize=7.8, color=INK, linespacing=1.25)
+    # slow state: key and value of the attention, and the second half of the concatenation
+    path(ax, [(58.6, 62.0), (bx, 62.0)], ACCENT)
+    path(ax, [(66.0, 62.0), (66.0, 68.5), (96.6, 68.5), (96.6, 39.25), (bx + bw, 39.25)], ACCENT, lw=1.2)
+    ax.text(60.8, 62.8, "K, V", ha="center", fontsize=8.2, color=ACCENT, fontweight="bold")
+    # fast state: query
+    path(ax, [(58.6, 30.0), (64.0, 30.0), (64.0, 54.0), (bx, 54.0)], ACCENT2)
+    ax.text(60.8, 30.8, "Q", ha="center", fontsize=8.2, color=ACCENT2, fontweight="bold")
 
-    # ---- (d) output
-    arrow(ax, 140.6, 46.0, 146.6, 46.0)
+    # ---- (c) output
+    arrow(ax, bx + bw, 25.0, 103.0, 25.0)
     if bool(d["has_pred"]):
         out = np.asarray(d["pred"], np.float32)
         cm_out, vmin, vmax, lab = with_bad("YlOrRd"), 0, 100, "Predicted fire risk\n(percentile within patch)"
     else:
         out = np.where(d["land"][None], np.asarray(d["target"], np.float32), np.nan)
-        cm_out, vmin, vmax, lab = fire_cm, 0, 1, "Observed target\n(VIIRS fire)"
-    c = stack(ax, out, 147.0, 38.0, 13.0, cm_out, vmin, vmax)
-    label(ax, c, 36.4, lab, fontsize=9.0, fontweight="bold")
-    label(ax, c, 31.0, "Fire on days D+1 to D+3,\none map per fast time step",
-          fontsize=8.0, color=MUTED)
+        cm_out, vmin, vmax, lab = ListedColormap(["#F2F2F4", "#B2182B"]), 0, 1, "Observed target\n(VIIRS fire)"
+    c = stack(ax, out, 103.5, 20.0, 13.0, cm_out, vmin, vmax)
+    label(ax, c, 18.4, lab, fontsize=9.0, fontweight="bold")
+    label(ax, c, 13.0, "Fire on days D+1 to D+3,\none map per fast time step", fontsize=8.0)
 
-    ax.text(85, -1.2,
-            f"All rasters are real data for one 384 {TIMES} 384 px patch (about 384 km across) on the "
-            f"0.01° grid, issue day D = {str(d['date'])}.\nEach stack shows all time slices used (count at top right), "
-            "oldest at the back. Blue is ocean; black lines are the coastline.",
-            ha="center", va="top", fontsize=8.8, color=MUTED)
     fig.savefig(OUT, dpi=300, bbox_inches="tight", facecolor="white")
     print("wrote", OUT)
 

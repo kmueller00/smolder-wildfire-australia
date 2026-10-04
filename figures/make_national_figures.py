@@ -3,7 +3,7 @@ smolder.evaluation.evaluate_national).
 
 fig_national_example.png  one forecast for the whole continent
 fig_national_maps.png     mean predicted risk and observed fire over 2020
-fig_national_skill.png    national lift, daily AUC-PR, reliability
+fig_national_skill.png    national lift (with persistence baseline), daily AUC-PR
 """
 import json
 import os
@@ -26,6 +26,9 @@ RES = os.path.join(HERE, "..", "results")
 S = json.load(open(os.path.join(RES, "national_2020.json")))
 D = pd.read_csv(os.path.join(RES, "national_2020_daily.csv"), parse_dates=["date"])
 M = np.load(os.path.join(RES, "national_2020_maps.npz"))
+_BP = os.path.join(RES, "national_2020_persistence.json")
+B = json.load(open(_BP)) if os.path.exists(_BP) else None     # evaluate_persistence.py
+BASELINE = "#8A8F98"
 LON0, LAT0, PX = 112.904998779, -9.005000113999998, 0.01
 OCEAN = "#C9D6E3"
 FIRE_HIT, FIRE_MISS = "#00E83A", "#C400FF"
@@ -77,7 +80,6 @@ def example():
     yy, xx = np.where(fire)
     fx, fy = EXT[0] + (xx + 0.5) * DOWN * PX, EXT[3] - (yy + 0.5) * DOWN * PX
     hit = top1[yy, xx]
-    row = D[D.date == pd.Timestamp(iso)].iloc[0]
 
     fig = new_figure((12.5, 10.2))
     ax = fig.add_subplot(111)
@@ -98,11 +100,6 @@ def example():
               loc="lower left", fontsize=9, frameon=True, facecolor="white", edgecolor=MUTED)
     ax.set_title(f"SMOLDER forecast issued {date}: fire risk for the next 3 days",
                  fontsize=13.5, fontweight="bold", color=INK, pad=10)
-    fig.text(0.5, 0.035,
-             f"The most fire-active issue day of the 2020 hold-out year. Flagging the top 1% of Australia's land "
-             f"captures {100*row['tpr_0.01']:.0f}% of the fire observed over the next three days "
-             f"({row['lift_0.01']:.0f}× better than random). Displayed at 0.04°.",
-             ha="center", fontsize=9.2, color=MUTED, style="italic", wrap=True)
     fig.savefig(os.path.join(HERE, "fig_national_example.png"), dpi=220, bbox_inches="tight", facecolor="white")
     print("wrote fig_national_example.png")
 
@@ -128,61 +125,44 @@ def maps():
         coast(ax)
         geo_axes(ax)
     fig.suptitle("Annual picture, 2020 hold-out year", fontsize=14, fontweight="bold", color=INK, y=1.0)
-    fig.text(0.5, 0.02, "Aggregated to 0.04° for display. Blue is ocean.", ha="center",
-             fontsize=9, color=MUTED, style="italic")
     fig.tight_layout()
     fig.savefig(os.path.join(HERE, "fig_national_maps.png"), dpi=220, bbox_inches="tight", facecolor="white")
     print("wrote fig_national_maps.png")
 
 
 def skill():
-    fig = new_figure((16.5, 5.0))
-    a, b, c = (fig.add_subplot(1, 3, i + 1) for i in range(3))
+    fig = new_figure((11.5, 4.6))
+    a, b = fig.add_subplot(1, 2, 1), fig.add_subplot(1, 2, 2)
     t = S["topk_national"]
     k = np.array([x["k"] for x in t]) * 100
-    a.plot(k, [x["lift"] for x in t], "-", color=ACCENT, lw=2.2, label="all fire")
-    a.plot(k, [x["lift_new"] for x in t], "--", color=ACCENT2, lw=2.0, label="new fire")
-    a.axhline(1, color=MUTED, lw=1.1, ls=(0, (4, 3)))
+    a.plot(k, [x["lift"] for x in t], "-", color=ACCENT, lw=2.2, zorder=4, label="SMOLDER")
+    if B is not None:
+        tb = B["topk_national"]
+        a.plot(np.array([x["k"] for x in tb]) * 100, [x["lift"] for x in tb], ls=(0, (6, 3)),
+               color=BASELINE, lw=2.0, zorder=3, label="persistence baseline")
+    a.axhline(1, color=MUTED, lw=1.1, ls=(0, (4, 3)), label="random selection")
+    a.legend(loc="upper right", fontsize=8.6, frameon=True, facecolor="white", edgecolor=SPINE_COLOR)
     a.set_xscale("log"); a.set_yscale("log")
-    a.set_xticks([0.1, 1, 10]); a.set_xticklabels(["0.1", "1", "10"])
-    a.set_yticks([1, 3, 10, 30, 100, 300]); a.set_yticklabels(["1", "3", "10", "30", "100", "300"])
+    xt = [0.1, 0.2, 0.5, 1, 2, 5, 10]
+    yt = [1, 2, 5, 10, 20, 50, 100, 200, 500]
+    a.set_xticks(xt); a.set_xticklabels([f"{v:g}" for v in xt])
+    a.set_yticks(yt); a.set_yticklabels([f"{v:g}" for v in yt])
     a.set_ylim(0.8, 500)
     a.set_xlabel("Share of Australia's land flagged (%)", fontsize=10, fontweight="bold", color=INK)
     a.set_ylabel("Lift over random", fontsize=10, fontweight="bold", color=INK)
     a.set_title("(a) National lift, mean over days", fontsize=11.5, fontweight="bold", color=INK, loc="left")
     style_axes(a)
-    a.legend(fontsize=9, loc="upper right", frameon=True, facecolor="white", edgecolor=MUTED)
 
     ap7 = D.set_index("date")["auc_pr"].rolling(7, center=True, min_periods=3).mean()
-    b.plot(ap7.index, ap7.values, "-", color=ACCENT, lw=2.0, label="daily AUC-PR, 7-day mean")
+    b.plot(ap7.index, ap7.values, "-", color=ACCENT, lw=2.0)
     b.set_ylim(0, max(0.3, float(np.nanmax(ap7)) * 1.15))
-    b.set_ylabel("AUC-PR", fontsize=10, fontweight="bold", color=INK)
+    b.set_ylabel("AUC-PR, 7-day mean", fontsize=10, fontweight="bold", color=INK)
     b.set_title("(b) National AUC-PR through 2020", fontsize=11.5, fontweight="bold", color=INK, loc="left")
     b.xaxis.set_major_locator(mdates.MonthLocator(bymonth=[1, 3, 5, 7, 9, 11]))
     b.xaxis.set_major_formatter(mdates.DateFormatter("%b"))
     style_axes(b)
-    b.legend(fontsize=9, loc="upper right", frameon=True, facecolor="white", edgecolor=MUTED)
-
-    rel = S["calibration"]["reliability"]
-    pr = np.array([r["mean_predicted"] for r in rel]); ob = np.array([r["observed_rate"] for r in rel])
-    lo, hi = 1e-5, 0.5
-    c.plot([lo, hi], [lo, hi], color=MUTED, lw=1.1, ls=(0, (4, 3)), label="perfect calibration")
-    c.plot(pr, ob, "-", color=ACCENT, lw=2.2, label="2020, calibrated on 2019")
-    c.set_xscale("log"); c.set_yscale("log"); c.set_xlim(lo, hi); c.set_ylim(lo, hi)
-    ticks = [1e-5, 1e-4, 1e-3, 1e-2, 1e-1]
-    lab = ["0.001 %", "0.01 %", "0.1 %", "1 %", "10 %"]
-    c.set_xticks(ticks); c.set_xticklabels(lab); c.set_yticks(ticks); c.set_yticklabels(lab)
-    c.set_xlabel("Predicted probability", fontsize=10, fontweight="bold", color=INK)
-    c.set_ylabel("Observed fire rate", fontsize=10, fontweight="bold", color=INK)
-    c.set_title("(c) Reliability", fontsize=11.5, fontweight="bold", color=INK, loc="left")
-    style_axes(c)
-    c.legend(fontsize=9, loc="upper left", frameon=True, facecolor="white", edgecolor=MUTED)
 
     fig.suptitle("National skill, 2020 hold-out year", fontsize=14, fontweight="bold", color=INK, y=1.03)
-    fig.text(0.5, -0.04,
-             f"All {S['n_days']} valid issue days, all {S['n_land_px']/1e6:.1f} M land pixels. New fire: more than "
-             "3 px from any fire detected in the three days up to the issue day.",
-             ha="center", fontsize=9, color=MUTED, style="italic")
     fig.tight_layout()
     fig.savefig(os.path.join(HERE, "fig_national_skill.png"), dpi=250, bbox_inches="tight", facecolor="white")
     print("wrote fig_national_skill.png")
