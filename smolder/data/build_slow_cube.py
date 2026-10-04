@@ -33,6 +33,9 @@ Writes cube_slow_8day.zarr with:
 
 Usage:  SMOLDER_DATA=/path/to/cubes python -m smolder.data.build_slow_cube            # all years
         YEARS=2015,2016 SMOLDER_DATA=/path/to/cubes python -m smolder.data.build_slow_cube
+    REBUILD_BINS=66-91 ... recomputes only those bins of an existing cube in
+    place, after checking that recomputing CHECK_BIN reproduces it exactly
+    (used after patching empty days of a daily cube, smolder.data.patch_cube_gap)
 """
 import os
 from pathlib import Path
@@ -75,13 +78,20 @@ def main():
     print(f"[info] channels {SLOW_CHANNELS} (agg: {[SLOW_AGG[c] for c in SLOW_CHANNELS]})")
     print(f"[info] output {OUT}  (~{n_bins*H*W*len(ch_idx)*4/1e9:.1f} GB)")
 
-    root = zarr.open_group(str(OUT), mode="w")
-    # chunk one bin x 512x512 x all-3-channels: a 256x256 patch then pulls one
-    # chunk per bin instead of 21 fat time-chunks of the raw cube.
-    z = root.create_dataset(
-        "X_slow", shape=(n_bins, H, W, len(ch_idx)), chunks=(1, 512, 512, len(ch_idx)),
-        dtype="f4", overwrite=True,
-    )
+    rebuild = os.environ.get("REBUILD_BINS", "")
+    if rebuild:
+        lo, hi = (int(v) for v in rebuild.split("-"))
+        root = zarr.open_group(str(OUT), mode="r+")
+        z = root["X_slow"]
+        assert z.shape[0] == n_bins, (z.shape, n_bins)
+    else:
+        root = zarr.open_group(str(OUT), mode="w")
+        # chunk one bin x 512x512 x all-3-channels: a 256x256 patch then pulls one
+        # chunk per bin instead of 21 fat time-chunks of the raw cube.
+        z = root.create_dataset(
+            "X_slow", shape=(n_bins, H, W, len(ch_idx)), chunks=(1, 512, 512, len(ch_idx)),
+            dtype="f4", overwrite=True,
+        )
 
     def locate(t):
         i = int(np.searchsorted(np.asarray(offsets), t, side="right") - 1)
@@ -90,12 +100,8 @@ def main():
     bin_start = np.zeros(n_bins, dtype=np.int32)
     year_of = np.zeros(n_bins, dtype=np.int32)
 
-    for b in range(n_bins):
+    def compute(b):
         t0 = b * bin_days
-        bin_start[b] = t0
-        ci, _ = locate(t0)
-        year_of[b] = groups[ci][0]
-
         # read the bin's days, crossing cubes if needed
         parts, t = [], t0
         t_end = t0 + bin_days
@@ -110,8 +116,26 @@ def main():
         stack = np.concatenate(parts, axis=0)
         stack = np.nan_to_num(stack, nan=0.0, posinf=0.0, neginf=0.0)
 
-        agg = np.where(sum_mask[None, None, :], stack.sum(axis=0), stack.mean(axis=0))
-        z[b] = agg.astype(np.float32)
+        return np.where(sum_mask[None, None, :], stack.sum(axis=0), stack.mean(axis=0)).astype(np.float32)
+
+    if rebuild:
+        cb = int(os.environ.get("CHECK_BIN", 10))
+        same = np.array_equal(compute(cb), np.asarray(z[cb]), equal_nan=True)
+        print(f"[check] recomputed bin {cb} {'matches exactly' if same else 'DIFFERS'}", flush=True)
+        if not same:
+            raise SystemExit("recomputation does not reproduce the existing cube; not rebuilding")
+        for b in range(lo, hi + 1):
+            z[b] = compute(b)
+            print(f"[bin] rebuilt {b} (days {b * bin_days}-{b * bin_days + bin_days - 1})", flush=True)
+        print(f"[done] rebuilt bins {lo}-{hi} of {OUT}")
+        return
+
+    for b in range(n_bins):
+        t0 = b * bin_days
+        bin_start[b] = t0
+        ci, _ = locate(t0)
+        year_of[b] = groups[ci][0]
+        z[b] = compute(b)
         if b % 10 == 0:
             print(f"[bin] {b}/{n_bins}  day {t0}  year {year_of[b]}", flush=True)
 
