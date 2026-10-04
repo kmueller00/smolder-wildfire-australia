@@ -148,6 +148,24 @@ def test_fuel_age_store_matches_direct_computation():
     assert dt_ < 30, dt_
 
 
+def test_data_loader_workers_draw_different_samples():
+    from torch.utils.data import DataLoader
+    from smolder.data.zarr_dual_datamodule import seed_worker
+
+    def batches():
+        ds = DualWindowDataset(DualPatchConfig(
+            zarr_paths=("cube_daily_smgrid_2017.zarr",), stats_path="channel_stats_2015_2018.json",
+            slow_cube_path="cube_slow_8day.zarr", day_offset=731, patch_size=64, samples_per_epoch=32, seed=123,
+            min_pos_pixels=1, pos_frac=0.5, fire_history=True, fire_history_lags=(3, 4, 5),
+            fire_history_distance=True))
+        dl = DataLoader(ds, batch_size=2, num_workers=4, worker_init_fn=seed_worker)
+        return [tuple((int(t), int(y), int(x)) for t, y, x in zip(b["t_end"], b["y0"], b["x0"]))
+                for _, b in zip(range(8), dl)]
+    a = batches()
+    assert len(set(a)) == len(a)                      # every batch distinct (it was 1 per 4 workers before)
+    assert batches() == a                             # reproducible for a given seed
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

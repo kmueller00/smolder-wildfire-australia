@@ -121,7 +121,7 @@ def main():
         patch_size=patch_size,
         samples_per_epoch=samples_per_epoch,
         batch_size=int(os.environ.get("BATCH_SIZE", 2)),
-        num_workers=8,
+        num_workers=int(os.environ.get("NUM_WORKERS", 8)),
         min_pos_pixels=min_pos_pixels,
         train_seed=seed,
         fire_history=os.environ.get("FIRE_HISTORY","0")=="1",

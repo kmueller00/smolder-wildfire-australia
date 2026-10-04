@@ -216,6 +216,23 @@ class DualPatchConfig:
     ndvi_slow_store: str = "cube_slow_8day_ndvi.zarr"
 
 
+def seed_worker(worker_id: int) -> None:
+    """DataLoader worker_init_fn: give every worker its own random stream.
+
+    Training samples are drawn from the dataset's own generator, created once
+    from cfg.seed. Forked workers each got a copy of that same generator, so
+    with N workers every batch came out N times and an epoch held only
+    1/N distinct samples (8 workers: 250 of 2000). Each worker now draws from
+    (seed, worker_id). Deterministic datasets reseed per index and are not
+    affected. LEGACY_WORKER_RNG=1 keeps the old behaviour (to reproduce the
+    released model's training exactly)."""
+    info = torch.utils.data.get_worker_info()
+    ds = info.dataset
+    if os.environ.get("LEGACY_WORKER_RNG", "0") == "1" or getattr(ds.cfg, "deterministic", False):
+        return
+    ds.rng = np.random.default_rng([int(ds.cfg.seed), int(worker_id)])
+
+
 def check_checkpoint_inputs(ckpt_path: str) -> None:
     """Stop if the input settings of this process (VPD_SOURCE, USE_VPD_ANOMALY,
     PERFECT_FORECAST, read by DualPatchConfig) differ from those the checkpoint
@@ -1287,7 +1304,7 @@ class DualDataModule(pl.LightningDataModule):
         return DataLoader(
             ds, batch_size=self.h.batch_size, shuffle=shuffle,
             num_workers=self.h.num_workers, pin_memory=True,
-            persistent_workers=self.h.num_workers > 0,
+            persistent_workers=self.h.num_workers > 0, worker_init_fn=seed_worker,
         )
 
     def train_dataloader(self):
