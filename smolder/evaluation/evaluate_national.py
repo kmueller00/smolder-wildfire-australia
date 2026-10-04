@@ -35,6 +35,9 @@ Outputs (in the working directory)
   national_<year>_daily.csv        one row per issue day
   national_<year>_maps.npz         annual mean risk, fire frequency, example days
   national_<year>_calibration.pkl  isotonic map (if CALIB_YEAR is set)
+  $SAVE_SCORES (optional)          float32 (n_days, n_land) scores of the land
+                                   pixels in row-major order, one row per issue
+                                   day, plus <SAVE_SCORES>.days.npy with the days
 
 Usage
   SMOLDER_DATA=/path/to/cubes CALIB_YEAR=2019 \
@@ -70,6 +73,7 @@ CELL = int(os.environ.get("CELL", 25))
 NEG_FRAC = float(os.environ.get("NEG_FRAC", 0.002))
 BATCH = int(os.environ.get("BATCH", 4))
 WORKERS = int(os.environ.get("WORKERS", 8))
+SAVE_SCORES = os.environ.get("SAVE_SCORES", "")
 DILATE = 3
 KS = [0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.10]
 OFFSETS = {2015: 0, 2016: 365, 2017: 731, 2018: 1096, 2019: 1461, 2020: 1826}
@@ -271,9 +275,17 @@ def main():
     fire_cnt = np.zeros((H, W), np.int32)
     n_days = [0]
     examples = []        # (n_fire, D, prob_down, fire_down)
+    dump = None
+    if SAVE_SCORES:
+        n_land = int((np.asarray(g["landmask"][...]) > 0).sum())
+        dump = np.lib.format.open_memmap(SAVE_SCORES, mode="w+", dtype=np.float32, shape=(len(days), n_land))
+        np.save(SAVE_SCORES + ".days.npy", np.asarray(days))
+        row_of = {D: i for i, D in enumerate(days)}
 
     def on_day(D, prob):
         lm = np.isfinite(prob)
+        if dump is not None:
+            dump[row_of[D]] = prob[lm]
         y = (np.asarray(yarr[D]) > 0) & lm
         recent = (np.asarray(yarr[D - 3]) > 0) & lm if D >= 3 else np.zeros_like(lm)
         new = y & ~ndimage.binary_dilation(recent, iterations=DILATE)
@@ -315,6 +327,8 @@ def main():
             del examples[N_EXAMPLE_DAYS:]
 
     land = national_days(model, EVAL_YEAR, days, device, on_day)
+    if dump is not None:
+        dump.flush()
 
     df = pd.DataFrame(rows)
     df.to_csv(f"national_{EVAL_YEAR}_daily.csv", index=False)

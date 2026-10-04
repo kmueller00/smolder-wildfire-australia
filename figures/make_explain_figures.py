@@ -173,14 +173,16 @@ def conditions(pixels):
     return p
 
 
-def prefire():
-    S = json.load(open(os.path.join(RES, "explain_2020_summary.json")))["trajectories"]
+def _prefire_figure(S, title, out, bins_end_on_issue_day=False):
+    """Median input trajectories of burned vs not burned pixels by land cover.
+    The model's slow bins are drawn at -144..-8 (their position in the
+    original figure); bins that end on the issue day at -136..0."""
     lcs = [lc for lc in LANDCOVERS if all(f"{f}|{lc}" in S["sm"] for f in ("fire", "no fire"))]
     fig = new_figure((16.0, 2.6 * len(lcs) + 0.8))
     for r, lc in enumerate(lcs):
         for c, (prefix, n, label, step) in enumerate(TRAJ):
             ax = fig.add_subplot(len(lcs), len(TRAJ), r * len(TRAJ) + c + 1)
-            x = -(np.arange(n)[::-1]) * step - (step if step > 1 else 0)
+            x = -(np.arange(n)[::-1]) * step - (step if step > 1 and not bins_end_on_issue_day else 0)
             for f, col, ls in (("fire", ACCENT2, "-"), ("no fire", ACCENT, "--")):
                 t = S[prefix][f"{f}|{lc}"]
                 ax.plot(x, t["q50"], ls, color=col, lw=2.0, zorder=3, label="burned" if f == "fire" else "did not burn")
@@ -194,11 +196,28 @@ def prefire():
             style_axes(ax)
             if r == 0 and c == 0:
                 ax.legend(fontsize=8.8, loc="upper left", frameon=True, facecolor="white", edgecolor=MUTED)
-    fig.suptitle("What precedes fire: inputs over the model's look-back window, by land cover", fontsize=14,
-                 fontweight="bold", color=INK, y=1.0)
+    fig.suptitle(title, fontsize=14, fontweight="bold", color=INK, y=1.0)
     fig.tight_layout(rect=(0, 0.01, 1, 0.99))
-    fig.savefig(os.path.join(HERE, "fig_explain_prefire.png"), dpi=220, bbox_inches="tight", facecolor="white")
-    print("wrote fig_explain_prefire.png")
+    fig.savefig(os.path.join(HERE, out), dpi=220, bbox_inches="tight", facecolor="white")
+    print("wrote", out)
+
+
+def prefire():
+    S = json.load(open(os.path.join(RES, "explain_2020_summary.json")))["trajectories"]
+    _prefire_figure(S, "What precedes fire: inputs over the model's look-back window, by land cover",
+                    "fig_explain_prefire.png")
+
+
+def prefire_newfire():
+    """Same figure for pixels more than 10 km from any fire of the last 32 days
+    (2019, results/anomaly_feature_diagnostic_2019.json)."""
+    path = os.path.join(RES, "anomaly_feature_diagnostic_2019.json")
+    if not os.path.exists(path):
+        print("skipped fig_explain_prefire_newfire.png (needs", path, ")")
+        return
+    S = json.load(open(path))["trajectories_far_10km"]
+    _prefire_figure(S, "What precedes new fire: pixels more than 10 km from fire of the last 32 days, 2019",
+                    "fig_explain_prefire_newfire.png", bins_end_on_issue_day=True)
 
 
 if __name__ == "__main__":
@@ -211,3 +230,4 @@ if __name__ == "__main__":
         else:
             print("skipped fig_explain_conditions.png (needs --pixels explain_2020_pixels.csv.gz)")
         prefire()
+        prefire_newfire()
