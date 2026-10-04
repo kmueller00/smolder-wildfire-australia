@@ -24,6 +24,19 @@ feature sets that separate what the model already sees from what FRP adds:
 The gains that matter are B - C (FRP over the binary fire maps) and SF - S
 (FRP over the model's own forecast).
 
+Directional spread features (DIR), relative to the nearest recent-fire
+pixel q of a sample pixel p, using only the issue day D:
+  wind_speed_q   BARRA-C2 daily mean 10 m wind speed at q on D (from uas, vas)
+  wind_align     cosine between that wind and the direction q -> p (0 at q)
+  wind_push      wind_speed_q * wind_align
+  gust_push      BARRA-C2 daily maximum wind at q on D * wind_align
+  upslope        (elevation p - elevation q) / distance, m per px (ETOPO1)
+  slope_p        slope at p
+  aspect_align   cosine between the aspect at p and the direction q -> p
+and, as an upper bound only (future weather), FUT: wind_align and wind_push
+from the mean wind of D+1..D+3. Models CW = C + DIR, SW = S + DIR,
+SWF = S + DIR + FUT (perfect-forecast wind) and SFW = S + FRP + DIR.
+
 All inputs end on D. Models are fitted on the odd-numbered issue days and
 evaluated on the even-numbered ones. Sample: every target fire pixel in the
 25 px zone and NEG_FRAC of the others, weighted back. Reported per distance
@@ -42,6 +55,7 @@ from multiprocessing import Pool
 import numpy as np
 import rasterio
 from scipy import ndimage
+from scipy.ndimage import map_coordinates
 from sklearn.ensemble import HistGradientBoostingClassifier
 
 from smolder.data.io import daily_cube, open_zarr_root
@@ -62,10 +76,16 @@ BANDS = [("0-3 km", -1, 3), ("3-10 km", 3, 10), ("10-25 km", 10, 25)]
 SCORES = os.environ.get("SCORES", "")
 BINARY = ["log_dist", "hist_near", "hist_own", "log_cluster_size", "cluster_growth"]
 FRP = ["log_frp", "n_det", "night_share", "log_cluster_frp"]
-ALL = BINARY + FRP + ["smolder_logit"]
-MODELS = {"A": ["log_dist"], "C": BINARY, "B": BINARY + FRP,
-          "S": BINARY + ["smolder_logit"], "SF": BINARY + FRP + ["smolder_logit"]}
-PAIRS = [("C", "B"), ("S", "SF")]
+DIR = ["wind_speed_q", "wind_align", "wind_push", "gust_push", "upslope", "slope_p", "aspect_align"]
+FUT = ["f_wind_align", "f_wind_push"]
+ALL = BINARY + FRP + DIR + FUT + ["smolder_logit"]
+SL = ["smolder_logit"]
+MODELS = {"A": ["log_dist"], "C": BINARY, "B": BINARY + FRP, "CW": BINARY + DIR,
+          "S": BINARY + SL, "SF": BINARY + FRP + SL, "SW": BINARY + DIR + SL,
+          "SWF": BINARY + DIR + FUT + SL, "SFW": BINARY + FRP + DIR + SL}
+PAIRS = [("C", "B"), ("S", "SF"), ("C", "CW"), ("S", "SW"), ("S", "SWF"), ("SF", "SFW")]
+AUX = os.environ.get("AUX", "/home/saturn/gwgi/gwgi107h/wildfire_data/firecastnet/aux_rasters")
+BARRA = os.environ.get("BARRA_STORE", "/home/saturn/gwgi/gwgi107h/wildfire_data/firecastnet/barra_c2_daily.zarr")
 EIGHT = np.ones((3, 3), bool)
 
 G = {}
@@ -87,6 +107,12 @@ def _init():
     G["det"] = dict(day=day, pix=(row * W + col)[ok], frp=z["frp"][keep][ok].astype(np.float64),
                     night=(z["daynight"][keep] == "N")[ok])
     G["order"] = np.argsort(G["det"]["day"], kind="stable")
+    for k in ("elevation", "slope", "aspect_sin", "aspect_cos"):
+        G[k] = np.load(f"{AUX}/static_{k}.npy", mmap_mode="r")
+    G["barra"] = open_zarr_root(BARRA)
+    blat, blon = np.asarray(G["barra"]["lat"]), np.asarray(G["barra"]["lon"])
+    G["barra_ij"] = lambda r, c: ((T.f + (r + 0.5) * T.e - blat[0]) / (blat[1] - blat[0]),
+                                  (T.c + (c + 0.5) * T.a - blon[0]) / (blon[1] - blon[0]))
     if SCORES:
         G["scores"] = np.load(SCORES, mmap_mode="r")
         G["row"] = {int(D): i for i, D in enumerate(np.load(SCORES + ".days.npy"))}
@@ -135,6 +161,30 @@ def one_day(D):
              log_cluster_size=np.log1p(size_now[L]), log_cluster_frp=np.log1p(cl_frp[L]),
              cluster_growth=np.log1p(size_now[L]) - np.log1p(size_prev[L]),
              hist_near=hist.ravel()[near], hist_own=hist[rr, cc])
+    # directional spread features relative to the nearest recent-fire pixel q
+    qr, qc = ir[rr, cc], ic[rr, cc]
+    east, north = (cc - qc).astype(np.float64), -(rr - qr).astype(np.float64)
+    dpx = np.hypot(east, north)
+    ue, un = np.where(dpx > 0, east / np.maximum(dpx, 1e-9), 0.0), np.where(dpx > 0, north / np.maximum(dpx, 1e-9), 0.0)
+    fi, fj = G["barra_ij"](qr, qc)
+    bz = G["barra"]
+
+    def at_q(var, days):
+        return np.mean([map_coordinates(np.asarray(bz[var][g], np.float32), [fi, fj], order=1, mode="nearest")
+                        for g in days], 0)
+    u, v = at_q("uas", [gD]), at_q("vas", [gD])
+    ws = np.hypot(u, v)
+    align = (u * ue + v * un) / np.maximum(ws, 1e-6)
+    f["wind_speed_q"], f["wind_align"], f["wind_push"] = ws, align, ws * align
+    f["gust_push"] = at_q("sfcWindmax", [gD]) * align
+    elev = G["elevation"]
+    f["upslope"] = (elev[rr, cc] - elev[qr, qc]) / np.maximum(dpx, 1.0)
+    f["slope_p"] = np.asarray(G["slope"][rr, cc], np.float64)
+    f["aspect_align"] = G["aspect_sin"][rr, cc] * ue + G["aspect_cos"][rr, cc] * un
+    fu, fv = at_q("uas", [gD + 1, gD + 2, gD + 3]), at_q("vas", [gD + 1, gD + 2, gD + 3])   # future: upper bound only
+    fw = np.hypot(fu, fv)
+    f["f_wind_align"] = (fu * ue + fv * un) / np.maximum(fw, 1e-6)
+    f["f_wind_push"] = fu * ue + fv * un
     if SCORES:
         full = np.full(H * W, np.nan, np.float32)
         full[np.flatnonzero(land.ravel())] = G["scores"][G["row"][D]]
