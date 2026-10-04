@@ -214,6 +214,7 @@ class DualPatchConfig:
     # and perfect-forecast channels; its position is self.fast_ndvi_idx.
     use_fast_ndvi: bool = field(default_factory=lambda: os.environ.get("USE_FAST_NDVI", "0") == "1")
     ndvi_slow_store: str = "cube_slow_8day_ndvi.zarr"
+    lai500_slow_store: str = "cube_slow_8day_lai500.zarr"   # SLOW_VEG=lai500 (build_lai500_slow)
 
 
 def seed_worker(worker_id: int) -> None:
@@ -329,8 +330,14 @@ class DualWindowDataset(Dataset):
         self.perfect_forecast = bool(getattr(cfg, "perfect_forecast", False))
         assert self.vpd_source in ("montes", "barra"), self.vpd_source
         self.slow_veg = str(getattr(cfg, "slow_veg", "lai"))
-        assert self.slow_veg in ("lai", "ndvi", "lai+ndvi"), self.slow_veg
-        if self.slow_veg != "lai":
+        assert self.slow_veg in ("lai", "ndvi", "lai+ndvi", "lai500"), self.slow_veg
+        if self.slow_veg == "lai500":
+            # HiQ-LAI 500 m averaged to 1 km (build_lai500_slow) in place of the 5 km LAI
+            assert self.slow_cube is not None, "slow_veg needs the pre-binned slow cube"
+            lg = open_zarr_root(getattr(cfg, "lai500_slow_store", "cube_slow_8day_lai500.zarr"))
+            assert np.array_equal(np.asarray(lg["bin_start_day"][...]), self.slow_bin_start), "LAI500 bins differ"
+            self.lai500_slow = lg["X_slow"]
+        elif self.slow_veg != "lai":
             assert self.slow_cube is not None, "slow_veg needs the pre-binned slow cube"
             ng = open_zarr_root(getattr(cfg, "ndvi_slow_store", "cube_slow_8day_ndvi.zarr"))
             assert np.array_equal(np.asarray(ng["bin_start_day"][...]), self.slow_bin_start), "NDVI bins differ"
@@ -820,7 +827,11 @@ class DualWindowDataset(Dataset):
         x_slow = np.nan_to_num(x_slow, nan=0.0, posinf=0.0, neginf=0.0)
         x_slow = (x_slow - self.slow_mean[None, None, None, :]) / self.slow_std[None, None, None, :]
         ndvi_slow = None
-        if self.slow_veg != "lai":                                  # same bins b_lo..b_end as x_slow
+        if self.slow_veg == "lai500":                               # same bins, same LAI normalization
+            il = SLOW_CHANNELS.index("LAI")
+            lv = np.asarray(self.lai500_slow[b_lo:b_end, y0:y0 + self.ph, x0:x0 + self.pw, 0], np.float32)
+            x_slow[..., il] = (np.nan_to_num(lv) - self.slow_mean[il]) / self.slow_std[il]
+        elif self.slow_veg != "lai":                                # same bins b_lo..b_end as x_slow
             nd = np.asarray(self.ndvi_slow[b_lo:b_end, y0:y0 + self.ph, x0:x0 + self.pw, 0], np.float32)
             ndvi_slow = (np.nan_to_num(nd) - self.x_mean_all[CH["NDVI"]]) / self.x_std_all[CH["NDVI"]]
             if self.slow_veg == "ndvi":

@@ -92,6 +92,8 @@ def main():
         ("land cover", [], 0),
         ("climate zone", [], 1),
     ]
+    if ds.slow_veg == "lai500":                 # 500 m LAI sits in the LAI position
+        GROUPS[0] = ("leaf area index (500 m)", GROUPS[0][1], None)
     if ds.slow_veg == "ndvi":                   # NDVI sits in the LAI position
         GROUPS[0] = ("NDVI", GROUPS[0][1], None)
     elif ds.slow_veg == "lai+ndvi":             # appended as the last slow channel
