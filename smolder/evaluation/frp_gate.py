@@ -36,6 +36,10 @@ pixel q of a sample pixel p, using only the issue day D:
 and, as an upper bound only (future weather), FUT: wind_align and wind_push
 from the mean wind of D+1..D+3. Models CW = C + DIR, SW = S + DIR,
 SWF = S + DIR + FUT (perfect-forecast wind) and SFW = S + FRP + DIR.
+If PM_STORE (barra_c2_pm_wind.zarr) exists, PM adds the afternoon wind of D
+(05 UTC, about 15:00 AEST) at q: speed, alignment and push; model SPM uses
+the terrain features of DIR with PM instead of the daily wind, and is
+compared with S and with SW (daily-mean wind).
 
 All inputs end on D. Models are fitted on the odd-numbered issue days and
 evaluated on the even-numbered ones. Sample: every target fire pixel in the
@@ -84,6 +88,13 @@ MODELS = {"A": ["log_dist"], "C": BINARY, "B": BINARY + FRP, "CW": BINARY + DIR,
           "S": BINARY + SL, "SF": BINARY + FRP + SL, "SW": BINARY + DIR + SL,
           "SWF": BINARY + DIR + FUT + SL, "SFW": BINARY + FRP + DIR + SL}
 PAIRS = [("C", "B"), ("S", "SF"), ("C", "CW"), ("S", "SW"), ("S", "SWF"), ("SF", "SFW")]
+PM_STORE = os.environ.get("PM_STORE", "/home/saturn/gwgi/gwgi107h/wildfire_data/firecastnet/barra_c2_pm_wind.zarr")
+PM = ["pm_speed_q", "pm_wind_align", "pm_wind_push"]
+TERRAIN = ["upslope", "slope_p", "aspect_align"]
+if os.path.exists(PM_STORE):
+    ALL = ALL[:-1] + PM + ["smolder_logit"]
+    MODELS["SPM"] = BINARY + TERRAIN + PM + SL
+    PAIRS += [("S", "SPM"), ("SW", "SPM")]
 AUX = os.environ.get("AUX", "/home/saturn/gwgi/gwgi107h/wildfire_data/firecastnet/aux_rasters")
 BARRA = os.environ.get("BARRA_STORE", "/home/saturn/gwgi/gwgi107h/wildfire_data/firecastnet/barra_c2_daily.zarr")
 EIGHT = np.ones((3, 3), bool)
@@ -110,6 +121,8 @@ def _init():
     for k in ("elevation", "slope", "aspect_sin", "aspect_cos"):
         G[k] = np.load(f"{AUX}/static_{k}.npy", mmap_mode="r")
     G["barra"] = open_zarr_root(BARRA)
+    if os.path.exists(PM_STORE):
+        G["pm"] = open_zarr_root(PM_STORE)
     blat, blon = np.asarray(G["barra"]["lat"]), np.asarray(G["barra"]["lon"])
     G["barra_ij"] = lambda r, c: ((T.f + (r + 0.5) * T.e - blat[0]) / (blat[1] - blat[0]),
                                   (T.c + (c + 0.5) * T.a - blon[0]) / (blon[1] - blon[0]))
@@ -185,6 +198,12 @@ def one_day(D):
     fw = np.hypot(fu, fv)
     f["f_wind_align"] = (fu * ue + fv * un) / np.maximum(fw, 1e-6)
     f["f_wind_push"] = fu * ue + fv * un
+    if "pm" in G:                                                   # afternoon (05 UTC) wind of D at q
+        pu = map_coordinates(np.asarray(G["pm"]["uas_05"][gD], np.float32), [fi, fj], order=1, mode="nearest")
+        pv = map_coordinates(np.asarray(G["pm"]["vas_05"][gD], np.float32), [fi, fj], order=1, mode="nearest")
+        pw = np.hypot(pu, pv)
+        f["pm_speed_q"], f["pm_wind_align"] = pw, (pu * ue + pv * un) / np.maximum(pw, 1e-6)
+        f["pm_wind_push"] = pu * ue + pv * un
     if SCORES:
         full = np.full(H * W, np.nan, np.float32)
         full[np.flatnonzero(land.ravel())] = G["scores"][G["row"][D]]
