@@ -130,6 +130,24 @@ def test_slow_veg_ndvi():
     assert np.allclose(br["x_slow"][-1, ..., 0].numpy(), ref, atol=1e-4)
 
 
+def test_fuel_age_store_matches_direct_computation():
+    import time
+    base = _ds()
+    kw = {**base.cfg.__dict__, "use_fuel_age": True, "fuel_age_lookback": 250}
+    direct = DualWindowDataset(DualPatchConfig(**{**kw, "fuel_age_store": None}))
+    stored = DualWindowDataset(DualPatchConfig(**kw))
+    assert direct.fire_age is None and stored.fire_age is not None
+    y0, x0, t_end = 1600, 2600, 300            # 250-day history of every step lies inside 2019
+    a, b = direct.sample_at(t_end, y0, x0), stored.sample_at(t_end, y0, x0)
+    assert torch.equal(a["x_fast"], b["x_fast"])
+    long = DualWindowDataset(DualPatchConfig(**{**kw, "fuel_age_lookback": 730}))
+    t0 = time.time(); c = long.sample_at(t_end, y0, x0); dt_ = time.time() - t0
+    i = long.fire_hist_start_idx + long.n_fire_hist_channels             # fuel age follows the fire history
+    ages = (c["x_fast"][..., i].numpy() + 1.0) * 365.0                   # undo (age - LB/2) / (LB/2)
+    assert ages.min() >= -1e-3 and ages.max() <= 730 + 1e-3 and (ages > 250).any()
+    assert dt_ < 30, dt_
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

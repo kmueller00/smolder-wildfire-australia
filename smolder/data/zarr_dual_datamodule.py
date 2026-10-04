@@ -120,8 +120,13 @@ class DualPatchConfig:
     # since last fire, leakage-free). Passed the gate TOGETHER: +22.3% AP on
     # top of elevation alone -- see aux_xgb_check.py.
     use_slope_aspect: bool = False
-    use_fuel_age: bool = False
-    fuel_age_lookback: int = 250
+    use_fuel_age: bool = field(default_factory=lambda: os.environ.get("USE_FUEL_AGE", "0") == "1")
+    fuel_age_lookback: int = field(default_factory=lambda: int(os.environ.get("FUEL_AGE_LOOKBACK", 250)))
+    # Precomputed days since the last fire per pixel and day (build_fire_age,
+    # continuous 2015-2020). Same values as computing from y_fire_3d inside the
+    # sample, but reads 14 slices instead of fuel_age_lookback, and is not cut
+    # at the first day of a split's own cubes. Used when the store exists.
+    fuel_age_store: Optional[str] = "fire_age_continental.zarr"
     # Downwind-of-recent-fire wind alignment (BARRA2 AUS-11). +2.4% AP on top
     # of the above, ranked 12/19 by SHAP -- see aux_xgb_check_wind.py.
     use_wind_dir: bool = False
@@ -222,15 +227,17 @@ def check_checkpoint_inputs(ckpt_path: str) -> None:
     diffs = []
     for key, default in (("vpd_source", "montes"), ("use_vpd_anomaly", False), ("perfect_forecast", False),
                          ("use_frp", False), ("use_barra_uv", False), ("slow_veg", "lai"),
-                         ("use_fast_ndvi", False)):
+                         ("use_fast_ndvi", False), ("use_fuel_age", False), ("fuel_age_lookback", 250)):
         t = trained.get(key)
         t = default if t is None else t
+        if key == "fuel_age_lookback" and not (trained.get("use_fuel_age") or False):
+            continue                                    # only matters when the model uses fuel age
         if t != getattr(now, key):
             diffs.append(f"{key}: checkpoint {t!r}, this run {getattr(now, key)!r}")
     if diffs:
         raise ValueError(f"{ckpt_path} was trained with other inputs ({'; '.join(diffs)}); "
                          "set VPD_SOURCE / USE_VPD_ANOMALY / PERFECT_FORECAST / USE_FRP / USE_BARRA_UV / SLOW_VEG / "
-                         "USE_FAST_NDVI to match")
+                         "USE_FAST_NDVI / USE_FUEL_AGE / FUEL_AGE_LOOKBACK to match")
 
 
 class DualWindowDataset(Dataset):
@@ -459,6 +466,10 @@ class DualWindowDataset(Dataset):
         # a longer lookback could be tried later without re-deriving the feature.
         self.use_fuel_age = bool(getattr(cfg, "use_fuel_age", False))
         self.fuel_age_lookback = int(getattr(cfg, "fuel_age_lookback", 250))
+        self.fire_age = None
+        fa_store = getattr(cfg, "fuel_age_store", None)
+        if self.use_fuel_age and fa_store and resolve(fa_store).exists():
+            self.fire_age = open_zarr_root(fa_store)["age_px"]
 
         # Channel index of aspect_sin within x_slow/x_fast (aspect_cos is the
         # next channel), needed by _augment to correct the ABSOLUTE compass
@@ -925,7 +936,13 @@ class DualWindowDataset(Dataset):
             ci_h, lt_h = self._locate(s_j - 3)
             return (np.asarray(self.groups[ci_h][cfg.y_key][lt_h, y0:y0 + self.ph, x0:x0 + self.pw]) > 0) & (lm_p > 0)
 
-        if self.use_fuel_age:
+        if self.use_fuel_age and self.fire_age is not None:
+            LB = self.fuel_age_lookback
+            g0 = steps[0] - 3 + int(cfg.day_offset)            # newest history index of step 0, global
+            ages = np.asarray(self.fire_age[g0:g0 + T, y0:y0 + self.ph, x0:x0 + self.pw], np.float32)
+            ages = np.minimum(np.where(ages == 65535, LB, ages), LB)        # never burned / older: capped
+            x_fast = np.concatenate([x_fast, ((ages - LB / 2.0) / (LB / 2.0))[..., None]], axis=-1)
+        elif self.use_fuel_age:
             LB = self.fuel_age_lookback
             e0 = steps[0] - 3                                  # newest history index of step 0
             hist = (self._read_y_span(e0 + 1, LB, cfg.y_key) > 0) & (lm_p > 0)[None]   # y_fire_3d[e0-LB+1 .. e0], land only
