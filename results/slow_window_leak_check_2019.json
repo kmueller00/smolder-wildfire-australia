@@ -1,0 +1,11 @@
+{
+ "check": "days after the issue day D inside the newest slow-branch bin (zarr_dual_datamodule._build_sample)",
+ "year": 2019,
+ "n_issue_days": 352,
+ "share_with_future_days": 1.0,
+ "share_covering_whole_target_window": 0.75,
+ "future_days_min": 1,
+ "future_days_max": 8,
+ "future_days_mean": 4.5,
+ "share_newest_bin_entirely_after_D": 0.125
+}

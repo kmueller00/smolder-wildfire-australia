@@ -16,7 +16,7 @@ All cubes are indexed on one continuous 2015-2020 day axis, so windows can
 cross year boundaries. Inputs are standardised with channel_stats_2015_2018.json
 (training years only). NDVI is present in the full cubes but not read.
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 import json
@@ -145,6 +145,21 @@ class DualPatchConfig:
     # model's decisions) rather than just reweighting the same loss the way
     # isolation_gamma does. TRAIN ONLY, 0.0 = disabled (old behaviour).
     fire_history_dropout_prob: float = 0.0
+    # Slow-branch window. Fixed (default): only 8-day bins that END on or
+    # before the issue day D = t_end - 1 are used, so the newest bin is 0-7
+    # days old. Legacy: every bin that STARTS on or before t_end, the
+    # behaviour the released checkpoint (smolder_swa.ckpt) was trained with;
+    # its newest bin always reaches past D, by 1-8 days and over the whole
+    # target window on 75 % of issue days (results/slow_window_leak_check_2019.json).
+    # Set SLOW_WINDOW_LEGACY=1 only to reproduce that checkpoint's results.
+    slow_window_legacy: bool = field(
+        default_factory=lambda: os.environ.get("SLOW_WINDOW_LEGACY", "0") == "1")
+    # Optional continent-wide distance to past fire for a loss weight, read
+    # from a store built by smolder.data.build_fire_distance (WINDOW=30: fire
+    # of the last 32 days). Returned as batch["past_dist"] (T, H, W) in px,
+    # for fast step s at index s - 3, so it never includes fire after that
+    # step's own issue day. Not a model input. None = not returned.
+    past_fire_dist_store: Optional[str] = None
 
 
 class DualWindowDataset(Dataset):
@@ -510,6 +525,16 @@ class DualWindowDataset(Dataset):
         forecasts days t_end..t_end+2) and patch corner (y0, x0)."""
         return self._build_sample(int(t_end), int(y0), int(x0))
 
+    def _slow_bin_end(self, t_end: int) -> int:
+        """Exclusive index of the newest slow bin used for a sample ending at
+        t_end (issue day t_end - 1). Fixed: bins that end on or before the
+        issue day. Legacy: bins that start on or before t_end (reaches 1-8
+        days past the issue day)."""
+        t_global = t_end + int(self.cfg.day_offset)
+        if getattr(self.cfg, "slow_window_legacy", False):
+            return int(np.searchsorted(self.slow_bin_start, t_global, side="right"))
+        return int(np.searchsorted(self.slow_bin_start, t_global - self.cfg.slow_bin, side="right"))
+
     def _build_sample(self, t_end: int, y0: int, x0: int) -> Dict[str, torch.Tensor]:
         cfg = self.cfg
         self._cur_yx = (y0, x0)
@@ -517,13 +542,14 @@ class DualWindowDataset(Dataset):
 
         # ---- slow branch ----
         if self.slow_cube is not None:
-            # Pre-binned on a FIXED GLOBAL grid: take the t_slow bins ending at or
-            # before t_end. The newest bin can be up to slow_bin-1 days stale,
-            # which is irrelevant for variables peaking at lag 130-150 -- and it
-            # is what lets bins be shared across targets (and thus precomputed).
+            # Pre-binned on a FIXED GLOBAL grid: take the t_slow bins that end on
+            # or before the issue day D = t_end - 1 (bin b covers days
+            # start_b .. start_b + slow_bin - 1). The newest bin can be up to
+            # slow_bin-1 days stale, which is irrelevant for variables peaking at
+            # lag 130-150 -- and it is what lets bins be shared across targets.
             # map this split's local day onto the cube's global 2015-2020 axis
             t_global = t_end + int(cfg.day_offset)
-            b_end = int(np.searchsorted(self.slow_bin_start, t_global, side="right"))
+            b_end = self._slow_bin_end(t_end)
             b_lo = b_end - self.t_slow
             if b_lo < 0:
                 raise IndexError(
@@ -752,6 +778,14 @@ class DualWindowDataset(Dataset):
         }
         if x_vslow is not None:
             out["x_vslow"] = torch.from_numpy(np.ascontiguousarray(x_vslow))
+        if getattr(cfg, "past_fire_dist_store", None):
+            if not hasattr(self, "_past_dist"):
+                self._past_dist = open_zarr_root(cfg.past_fire_dist_store)["dist_px"]
+            # step j has issue day s_j = t_end - t_fast + j and reads index s_j - 3
+            g_hi = t_end - 3 + int(cfg.day_offset)          # exclusive end: step T-1 reads t_end - 4
+            pd_ = np.asarray(self._past_dist[g_hi - self.t_fast:g_hi, y0:y0 + self.ph, x0:x0 + self.pw],
+                             dtype=np.float32)
+            out["past_dist"] = torch.from_numpy(np.ascontiguousarray(pd_))
 
         if getattr(cfg, "augment", False) and not cfg.deterministic:
             self._augment(out)
@@ -793,6 +827,8 @@ class DualWindowDataset(Dataset):
         if "x_vslow" in out:
             out["x_vslow"] = rot_flip(out["x_vslow"], (1, 2))
         out["y"] = rot_flip(out["y"], (-2, -1))                # (T,H,W)
+        if "past_dist" in out:
+            out["past_dist"] = rot_flip(out["past_dist"], (-2, -1))
         out["mask"] = rot_flip(out["mask"], (-2, -1))          # (H,W)
         out["x_cat"] = rot_flip(out["x_cat"], (0, 1))          # (H,W,ncat)
         out["x_static"] = rot_flip(out["x_static"], (0, 1))   # (H,W,C_static)
@@ -856,6 +892,7 @@ class DualDataModule(pl.LightningDataModule):
         fire_history_dropout_prob: float = 0.0,
         new_fire_frac: float = 0.0,
         min_new_fire_pixels: int = 1,
+        past_fire_dist_store: Optional[str] = None,
         min_pos_pixels: int = 20,   # scale with patch area to hold fire-DENSITY fixed
                                      # across patch-size experiments: 20/256^2 = 0.0305%
         train_seed: int = 123,      # override for multi-seed noise-floor checks;
@@ -910,6 +947,7 @@ class DualDataModule(pl.LightningDataModule):
             use_ffdi=h.use_ffdi, use_fmc=h.use_fmc, fmc_store=h.fmc_store,
             augment=h.augment,
             fire_history_dropout_prob=h.fire_history_dropout_prob,
+            past_fire_dist_store=h.past_fire_dist_store,
         ))
         self.val_ds = DualWindowDataset(DualPatchConfig(
             zarr_paths=tuple(h.val_paths), stats_path=h.stats_path,
