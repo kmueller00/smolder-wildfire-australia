@@ -40,6 +40,9 @@ If PM_STORE (barra_c2_pm_wind.zarr) exists, PM adds the afternoon wind of D
 (05 UTC, about 15:00 AEST) at q: speed, alignment and push; model SPM uses
 the terrain features of DIR with PM instead of the daily wind, and is
 compared with S and with SW (daily-mean wind).
+EXTRA_VEG=1 (default) adds NDVI (MODIS 500 m) and LAI (HiQ-LAI 5 km) at p on
+D from the daily cube: models SN = S + NDVI and SLAI = S + LAI. SMOLDER
+already has LAI, so SLAI - S shows the noise level for this comparison.
 
 All inputs end on D. Models are fitted on the odd-numbered issue days and
 evaluated on the even-numbered ones. Sample: every target fire pixel in the
@@ -91,6 +94,12 @@ PAIRS = [("C", "B"), ("S", "SF"), ("C", "CW"), ("S", "SW"), ("S", "SWF"), ("SF",
 PM_STORE = os.environ.get("PM_STORE", "/home/saturn/gwgi/gwgi107h/wildfire_data/firecastnet/barra_c2_pm_wind.zarr")
 PM = ["pm_speed_q", "pm_wind_align", "pm_wind_push"]
 TERRAIN = ["upslope", "slope_p", "aspect_align"]
+EXTRA_VEG = os.environ.get("EXTRA_VEG", "1") == "1"
+if EXTRA_VEG:
+    ALL = ALL[:-1] + ["ndvi_p", "lai_p"] + ["smolder_logit"]
+    MODELS["SN"] = BINARY + ["ndvi_p"] + SL
+    MODELS["SLAI"] = BINARY + ["lai_p"] + SL
+    PAIRS += [("S", "SN"), ("S", "SLAI"), ("SLAI", "SN")]
 if os.path.exists(PM_STORE):
     ALL = ALL[:-1] + PM + ["smolder_logit"]
     MODELS["SPM"] = BINARY + TERRAIN + PM + SL
@@ -105,6 +114,7 @@ G = {}
 def _init():
     g = open_zarr_root(daily_cube(EVAL_YEAR))
     G["y"] = g["y_fire_3d"]
+    G["X"] = g["X"]
     G["land"] = np.asarray(g["landmask"][...]) > 0
     z = np.load(FIRMS)
     keep = np.isin(z["conf"], ["n", "h"]) & (z["type"] == 0)
@@ -198,6 +208,9 @@ def one_day(D):
     fw = np.hypot(fu, fv)
     f["f_wind_align"] = (fu * ue + fv * un) / np.maximum(fw, 1e-6)
     f["f_wind_push"] = fu * ue + fv * un
+    if EXTRA_VEG:                                                   # NDVI / LAI at p on the issue day
+        xv = np.asarray(G["X"][D, :, :, 5:7], np.float32)
+        f["ndvi_p"], f["lai_p"] = xv[rr, cc, 0], xv[rr, cc, 1]
     if "pm" in G:                                                   # afternoon (05 UTC) wind of D at q
         pu = map_coordinates(np.asarray(G["pm"]["uas_05"][gD], np.float32), [fi, fj], order=1, mode="nearest")
         pv = map_coordinates(np.asarray(G["pm"]["vas_05"][gD], np.float32), [fi, fj], order=1, mode="nearest")
