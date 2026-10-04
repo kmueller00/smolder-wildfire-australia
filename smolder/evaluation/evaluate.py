@@ -23,7 +23,7 @@ import os
 import numpy as np, torch, pandas as pd
 from scipy import ndimage
 from smolder.data.io import daily_cube, open_zarr_root
-from smolder.data.zarr_dual_datamodule import DualWindowDataset, DualPatchConfig
+from smolder.data.zarr_dual_datamodule import check_checkpoint_inputs, DualWindowDataset, DualPatchConfig
 from smolder.models.conv_lstm_lit_dual import ConvLSTMLitDual
 
 CKPT=os.environ.get("CKPT","checkpoints/smolder_swa.ckpt")
@@ -64,6 +64,7 @@ def main():
     torch.set_num_threads(8)
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     g=open_zarr_root(daily_cube(EVAL_YEAR)); TIMES=list(g.attrs.get('time',[]))
+    check_checkpoint_inputs(CKPT)
     m=ConvLSTMLitDual.load_from_checkpoint(CKPT,map_location=device); m.eval(); m.to(device)
     print(f'[info] loaded {os.path.basename(CKPT)} on {device}, patch_size={PATCH}',flush=True)
 

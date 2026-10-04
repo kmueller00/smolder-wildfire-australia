@@ -39,7 +39,7 @@ import pandas as pd
 import torch
 
 from smolder.data.io import CHANNEL_STATS, daily_cube, open_zarr_root
-from smolder.data.zarr_dual_datamodule import (CH, FAST_CHANNELS, SLOW_CHANNELS, DualPatchConfig,
+from smolder.data.zarr_dual_datamodule import (check_checkpoint_inputs, CH, FAST_CHANNELS, SLOW_CHANNELS, DualPatchConfig,
                                                DualWindowDataset)
 from smolder.evaluation.evaluate_national import ap_auc
 from smolder.models.conv_lstm_lit_dual import ConvLSTMLitDual
@@ -66,6 +66,7 @@ LANDCOVER = {20: "shrubland", 30: "grassland", 40: "cropland", 112: "closed fore
 def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     rng = np.random.default_rng(SEED)
+    check_checkpoint_inputs(CKPT)
     model = ConvLSTMLitDual.load_from_checkpoint(CKPT, map_location=device).eval().to(device)
     cube = daily_cube(EVAL_YEAR)
     times = list(open_zarr_root(cube).attrs["time"])
@@ -184,7 +185,11 @@ def main():
                 sm_traj = denorm_slow(slow[:, a, c, sl["SM"]], "SM")
                 lai_traj = denorm_slow(slow[:, a, c, sl["LAI"]], "LAI")
                 ppt_traj = denorm_slow(slow[:, a, c, sl["PPT"]], "PPT")
-                vpd = denorm(fast[:, a, c, fa["VPD"]], "VPD")
+                if ds.vpd_source == "barra":           # BARRA-C2 VPD is normalized with its own statistics
+                    bm, bs = ds.barra_stats["vpd"]
+                    vpd = fast[:, a, c, fa["VPD"]] * bs + bm
+                else:
+                    vpd = denorm(fast[:, a, c, fa["VPD"]], "VPD")
                 d = fast[-1, a, c, fh0 + ds.n_fire_hist_channels - 1]
                 rows.append(dict(
                     cls=cname, date=date, patch=kept - 1, climate=clim[a, c], landcover=lcov[a, c],

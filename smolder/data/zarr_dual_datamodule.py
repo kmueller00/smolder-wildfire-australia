@@ -188,6 +188,25 @@ class DualPatchConfig:
     barra_store: str = "barra_c2_daily.zarr"
 
 
+def check_checkpoint_inputs(ckpt_path: str) -> None:
+    """Stop if the input settings of this process (VPD_SOURCE, USE_VPD_ANOMALY,
+    PERFECT_FORECAST, read by DualPatchConfig) differ from those the checkpoint
+    was trained with (its stored datamodule hyperparameters). Checkpoints from
+    before these options existed count as trained with the defaults."""
+    ck = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+    trained = ck.get("datamodule_hyper_parameters") or {}
+    now = DualPatchConfig(zarr_paths=(), stats_path="")
+    diffs = []
+    for key, default in (("vpd_source", "montes"), ("use_vpd_anomaly", False), ("perfect_forecast", False)):
+        t = trained.get(key)
+        t = default if t is None else t
+        if t != getattr(now, key):
+            diffs.append(f"{key}: checkpoint {t!r}, this run {getattr(now, key)!r}")
+    if diffs:
+        raise ValueError(f"{ckpt_path} was trained with other inputs ({'; '.join(diffs)}); "
+                         "set VPD_SOURCE / USE_VPD_ANOMALY / PERFECT_FORECAST to match")
+
+
 class DualWindowDataset(Dataset):
     """Samples one (slow window, fast window, target) triple per __getitem__."""
 

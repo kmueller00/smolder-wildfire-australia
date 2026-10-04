@@ -57,7 +57,7 @@ from scipy import ndimage
 from torch.utils.data import DataLoader, Dataset
 
 from smolder.data.io import daily_cube, open_zarr_root
-from smolder.data.zarr_dual_datamodule import DualPatchConfig, DualWindowDataset
+from smolder.data.zarr_dual_datamodule import check_checkpoint_inputs, DualPatchConfig, DualWindowDataset
 from smolder.models.conv_lstm_lit_dual import ConvLSTMLitDual
 
 CKPT = os.environ.get("CKPT", "checkpoints/smolder_swa.ckpt")
@@ -219,6 +219,7 @@ def valid_days(year, stride):
 def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     torch.set_num_threads(8)
+    check_checkpoint_inputs(CKPT)
     model = ConvLSTMLitDual.load_from_checkpoint(CKPT, map_location=device).eval().to(device)
     print(f"[national] model {os.path.basename(CKPT)} on {device}", flush=True)
     rng = np.random.default_rng(0)
