@@ -782,6 +782,32 @@ class DualWindowDataset(Dataset):
             out[j] = (vpd_raw[j] - m) / s
         return np.clip(np.nan_to_num(out, nan=0.0, posinf=0.0, neginf=0.0), -6.0, 6.0)
 
+    def channel_layout(self) -> Dict[str, Dict[str, List[int]]]:
+        """Channel indices of every input group in x_slow and x_fast, in the
+        order _build_sample appends them (checked against each sample)."""
+        cfg = self.cfg
+        stat = ["biomass", "landmask"] + (["lightning"] if self.use_lightning else []) \
+            + (["elevation"] if self.use_elevation else []) \
+            + (["slope", "aspect", "aspect"] if self.use_slope_aspect else [])
+        doy = ["day of year"] * (2 if getattr(cfg, "add_doy", True) else 0)
+        slow = list(SLOW_CHANNELS) + stat + doy + (["NDVI (slow)"] if self.slow_veg == "lai+ndvi" else [])
+        fast = list(FAST_CHANNELS) + stat + doy
+        if getattr(cfg, "fire_history", False):
+            fast += ["fire history"] * self.n_fire_hist_channels
+        fast += ["fuel age"] * int(self.use_fuel_age) + ["wind direction (BARRA2)"] * int(self.use_wind_dir) \
+            + ["FFDI"] * (2 * int(self.use_ffdi)) + ["FMC"] * (2 * int(self.use_fmc)) \
+            + ["fire radiative power"] * (3 * int(self.use_frp)) + ["wind u/v"] * (2 * int(self.use_barra_uv)) \
+            + ["NDVI (fast)"] * int(self.use_fast_ndvi) + ["VPD anomaly"] * int(self.use_vpd_anomaly) \
+            + ["perfect forecast"] * (5 * int(self.perfect_forecast))
+        out = {}
+        for key, names in (("slow", slow), ("fast", fast)):
+            d: Dict[str, List[int]] = {}
+            for i, nm in enumerate(names):
+                d.setdefault(nm, []).append(i)
+            out[key] = d
+        out["n"] = {"slow": len(slow), "fast": len(fast)}
+        return out
+
     def _slow_bin_end(self, t_end: int) -> int:
         """Exclusive index of the newest slow bin used for a sample ending at
         t_end (issue day t_end - 1). Fixed: bins that end on or before the
@@ -858,7 +884,12 @@ class DualWindowDataset(Dataset):
             x_vslow = (x_vslow - vm[None,None,None,:]) / vs[None,None,None,:]
 
         # ---- fast branch: daily ----
-        x_fast = self._read_span(t_end, cfg.fast_days, self.read_fast_idx)
+        ndvi_raw = None
+        if self.use_fast_ndvi:                                     # NDVI in the same pass over the cube
+            xr = self._read_span(t_end, cfg.fast_days, self.read_fast_idx + [self.read_ndvi_idx])
+            x_fast, ndvi_raw = xr[..., :-1], xr[..., -1]
+        else:
+            x_fast = self._read_span(t_end, cfg.fast_days, self.read_fast_idx)
         x_fast = np.nan_to_num(x_fast, nan=0.0, posinf=0.0, neginf=0.0)
         vpd_raw = x_fast[..., FAST_CHANNELS.index("VPD")].copy() if self.use_vpd_anomaly else None
         if self.vpd_source == "barra":
@@ -958,6 +989,8 @@ class DualWindowDataset(Dataset):
         T = self.t_fast
         steps = [t_end - T + j for j in range(T)]
 
+        fuel_age_idx = None
+
         def _recent_fire(s_j):
             if s_j - 3 < 0:
                 return np.zeros((self.ph, self.pw), bool)
@@ -969,6 +1002,7 @@ class DualWindowDataset(Dataset):
             g0 = steps[0] - 3 + int(cfg.day_offset)            # newest history index of step 0, global
             ages = np.asarray(self.fire_age[g0:g0 + T, y0:y0 + self.ph, x0:x0 + self.pw], np.float32)
             ages = np.minimum(np.where(ages == 65535, LB, ages), LB)        # never burned / older: capped
+            fuel_age_idx = x_fast.shape[-1]
             x_fast = np.concatenate([x_fast, ((ages - LB / 2.0) / (LB / 2.0))[..., None]], axis=-1)
         elif self.use_fuel_age:
             LB = self.fuel_age_lookback
@@ -983,6 +1017,7 @@ class DualWindowDataset(Dataset):
                     last = np.where(_recent_fire(s_j), e, last)
                 age = np.minimum(e - last, LB).astype(np.float32)
                 fa[j, :, :, 0] = (age - LB / 2.0) / (LB / 2.0)
+            fuel_age_idx = x_fast.shape[-1]
             x_fast = np.concatenate([x_fast, fa], axis=-1)
 
         if self.use_wind_dir:
@@ -1063,7 +1098,7 @@ class DualWindowDataset(Dataset):
                                      ((v - bst["vas"][0]) / bst["vas"][1])[..., None]], axis=-1)
 
         if self.use_fast_ndvi:
-            nd = np.nan_to_num(self._read_span(t_end, T, [self.read_ndvi_idx])[..., 0])
+            nd = np.nan_to_num(ndvi_raw)
             nd = (nd - self.x_mean_all[CH["NDVI"]]) / self.x_std_all[CH["NDVI"]]
             assert x_fast.shape[-1] == self.fast_ndvi_idx, (x_fast.shape, self.fast_ndvi_idx)
             x_fast = np.concatenate([x_fast, nd[..., None].astype(np.float32)], axis=-1)
@@ -1086,7 +1121,13 @@ class DualWindowDataset(Dataset):
             x_fast[..., i0:i0 + self.n_fire_hist_channels] = 0.0
             if frp_slice is not None:
                 x_fast[..., frp_slice] = 0.0
+            if fuel_age_idx is not None:                         # ages of a few days are fire history too
+                x_fast[..., fuel_age_idx] = 1.0                   # = the cap: "long unburned"
 
+        if not hasattr(self, "_layout_n"):
+            self._layout_n = self.channel_layout()["n"]
+        assert (x_slow.shape[-1], x_fast.shape[-1]) == (self._layout_n["slow"], self._layout_n["fast"]), \
+            (x_slow.shape, x_fast.shape, self._layout_n)
         out = {
             "x_slow": torch.from_numpy(np.ascontiguousarray(x_slow)),
             "x_fast": torch.from_numpy(np.ascontiguousarray(x_fast)),

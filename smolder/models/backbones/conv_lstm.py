@@ -2,6 +2,7 @@ import lightning as L
 import logging
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 logger = logging.getLogger(__name__)
 
@@ -427,12 +428,36 @@ class ConvLSTMSegDual(nn.Module):
             return None
         return self.static_head(x_static)
 
+    def slow_value(self, h_slow):
+        """Cross-attention output for a slow state, (B, C, H, W) -> (B, C, H, W).
+
+        There is one key per pixel, so every attention weight is softmax over a
+        single score = 1 and the output is out_proj(v_proj(h_slow)), whatever the
+        query (dropout is 0). Computing it this way gives the same result as
+        nn.MultiheadAttention without the query/key projections and softmax, and
+        lets the caller compute it once for all fast steps."""
+        C = h_slow.shape[1]
+        a = self.attn
+        assert a.dropout == 0.0 and a._qkv_same_embed_dim
+        x = h_slow.permute(0, 2, 3, 1)                            # (B, H, W, C)
+        v = F.linear(x, a.in_proj_weight[2 * C:], a.in_proj_bias[2 * C:] if a.in_proj_bias is not None else None)
+        return a.out_proj(v).permute(0, 3, 1, 2)
+
+    def fuse_with_value(self, h_fast, value, h_slow):
+        """LayerNorm(value + h_fast) per pixel, concatenated with h_slow -> (B, 2C, H, W)."""
+        att = self.attn_norm((value + h_fast).permute(0, 2, 3, 1)).permute(0, 3, 1, 2)
+        return torch.cat([att, h_slow], dim=1)
+
     def _cross_attend(self, h_fast, h_slow):
         """Fast queries slow, per pixel. h_*: (B, C, H, W) -> fused (B, 2C, H, W)."""
+        return self.fuse_with_value(h_fast, self.slow_value(h_slow), h_slow)
+
+    def _cross_attend_reference(self, h_fast, h_slow):
+        """The original nn.MultiheadAttention form (kept to test slow_value against)."""
         B, C, H, W = h_fast.shape
-        q = h_fast.permute(0, 2, 3, 1).reshape(B * H * W, 1, C)   # (N,1,C) query
-        kv = h_slow.permute(0, 2, 3, 1).reshape(B * H * W, 1, C)  # (N,1,C) key/value
-        attended, _ = self.attn(q, kv, kv)                        # (N,1,C)
+        q = h_fast.permute(0, 2, 3, 1).reshape(B * H * W, 1, C)
+        kv = h_slow.permute(0, 2, 3, 1).reshape(B * H * W, 1, C)
+        attended, _ = self.attn(q, kv, kv)
         attended = self.attn_norm(attended + q).reshape(B, H, W, C).permute(0, 3, 1, 2)
         return torch.cat([attended, h_slow], dim=1)
 

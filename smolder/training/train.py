@@ -16,6 +16,7 @@ from pathlib import Path
 import os, sys
 
 import lightning.pytorch as pl
+import torch
 from lightning.pytorch.loggers import CSVLogger
 from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping, LearningRateMonitor
 
@@ -244,6 +245,7 @@ def main():
         LearningRateMonitor(logging_interval="epoch"),
     ]
 
+    torch.backends.cudnn.benchmark = True        # fixed input sizes: let cuDNN pick the fastest conv algorithms
     trainer = pl.Trainer(
         max_epochs=max_epochs,
         min_epochs=min_epochs,

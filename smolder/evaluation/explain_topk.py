@@ -100,8 +100,16 @@ def main():
         GROUPS.insert(1, ("NDVI", [("s", [-1])], None))
     if ds.use_fast_ndvi:
         GROUPS.insert(1, ("NDVI (fast branch)", [("f", [ds.fast_ndvi_idx])], None))
-    if ds.use_vpd_anomaly:                      # appended as the last fast channel
-        GROUPS.insert(6, ("VPD anomaly", [("f", [-1])], None))
+    lay = ds.channel_layout()                  # every optional input as its own group
+    if ds.use_vpd_anomaly:
+        GROUPS.insert(6, ("VPD anomaly", [("f", lay["fast"]["VPD anomaly"])], None))
+    for name, label in (("fire radiative power", "fire radiative power"), ("wind u/v", "wind direction (u, v)"),
+                        ("fuel age", "fuel age")):
+        if name in lay["fast"]:
+            GROUPS.append((label, [("f", lay["fast"][name])], None))
+    for name in ("elevation", "slope", "aspect", "lightning"):     # statics: in both branches
+        if name in lay["fast"]:
+            GROUPS.append((name, [("s", lay["slow"][name]), ("f", lay["fast"][name])], None))
     stats = json.loads(CHANNEL_STATS.read_text())
     mu, sd = np.asarray(stats["x_mean"]), np.asarray(stats["x_std"])
     sd = np.where(sd < 1e-6, 1.0, sd)

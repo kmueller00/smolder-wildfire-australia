@@ -93,7 +93,13 @@ class ConvLSTMLitDual(ConvLSTMLitV2):
         # folding time into batch so fuse_states sees (N,C,H,W)
         h_slow_rep = h_slow.unsqueeze(1).expand(B, T, Ch, H, W).reshape(B * T, Ch, H, W)
         h_fast_flat = h_fast_seq.reshape(B * T, Ch, H, W)
-        fused = self.model.fuse_states(h_slow_rep, h_fast_flat)  # (B*T, 2C, H, W)
+        if self.model.fuse == "cross_attn":
+            # the attention output depends only on the slow state: compute it once, not per step
+            value = self.model.slow_value(h_slow)
+            value_rep = value.unsqueeze(1).expand(B, T, Ch, H, W).reshape(B * T, Ch, H, W)
+            fused = self.model.fuse_with_value(h_fast_flat, value_rep, h_slow_rep)
+        else:
+            fused = self.model.fuse_states(h_slow_rep, h_fast_flat)  # (B*T, 2C, H, W)
 
         static_emb = self.model.encode_static(self._prep_static(x_static))  # (B,hidden,H,W) or None
         if static_emb is not None:
