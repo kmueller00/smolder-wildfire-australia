@@ -242,7 +242,7 @@ def main():
             monitor="val_ap_newfire", mode="max", save_top_k=1,
             filename="bestnewfire-{epoch}-{val_ap_newfire:.4f}",
         ),
-        EarlyStopping(monitor="val_ap", mode="max", patience=6),
+        EarlyStopping(monitor="val_ap", mode="max", patience=int(os.environ.get("PATIENCE", 6))),
         LearningRateMonitor(logging_interval="epoch"),
     ]
 
