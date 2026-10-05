@@ -226,6 +226,10 @@ class DualPatchConfig:
     fire_store: str = "fire_inputs_continental.zarr"
     barra_fast_store: str = "barra_c2_fast.zarr"
     slow_lai500m_store: str = "cube_slow_8day_lai500m.zarr"
+    # NDVI for use_fast_ndvi when the daily cube has no NDVI channel (the
+    # archived cubes): the distinct 8-day composites and, per global day, the
+    # composite it shows (package_zenodo STEP=ndvi). Same values as the cube.
+    ndvi_store: str = "ndvi_composites.zarr"
     # Leave the statics and day-of-year channels out of x_slow/x_fast and return
     # them once per sample ("x_static", "doy_slow", "doy_fast"); expand_compact()
     # inserts them again on the GPU at the same channel positions. Training only
@@ -475,9 +479,15 @@ class DualWindowDataset(Dataset):
         self.read_slow_idx = [cube_ch[c] for c in SLOW_CHANNELS]
         self.read_fast_idx = [cube_ch[c] for c in FAST_CHANNELS]
         self.use_fast_ndvi = bool(getattr(cfg, "use_fast_ndvi", False))
-        if self.use_fast_ndvi and "NDVI" not in cube_ch:
-            raise ValueError("use_fast_ndvi needs a cube with an NDVI channel (not the NDVI-free archive)")
         self.read_ndvi_idx = cube_ch.get("NDVI")
+        self.ndvi_comp = None
+        if self.use_fast_ndvi and self.read_ndvi_idx is None:
+            store = getattr(cfg, "ndvi_store", "ndvi_composites.zarr")
+            if not resolve(store).exists():
+                raise ValueError(f"use_fast_ndvi needs a cube with an NDVI channel or {store}")
+            ng = open_zarr_root(store)
+            self.ndvi_comp = ng["ndvi"]
+            self.ndvi_day_to_comp = np.asarray(ng["day_to_comp"][...])
         self.agb_mean = float(stats["agb_mean"])
         self.agb_std = float(stats["agb_std"]) or 1.0
 
@@ -1048,9 +1058,18 @@ class DualWindowDataset(Dataset):
 
         # ---- fast branch: daily ----
         ndvi_raw = None
-        if self.use_fast_ndvi:                                     # NDVI in the same pass over the cube
+        if self.use_fast_ndvi and self.ndvi_comp is None:         # NDVI in the same pass over the cube
             xr = self._read_span(t_end, cfg.fast_days, self.read_fast_idx + [self.read_ndvi_idx])
             x_fast, ndvi_raw = xr[..., :-1], xr[..., -1]
+        elif self.use_fast_ndvi:                                   # cube without NDVI: composite store
+            x_fast = self._read_span(t_end, cfg.fast_days, self.read_fast_idx)
+            g = np.arange(t_end - cfg.fast_days, t_end) + int(cfg.day_offset)
+            comp = self.ndvi_day_to_comp[g]
+            if (comp < 0).any():
+                raise ValueError(f"no NDVI composite for global days {g[comp < 0].tolist()} in {cfg.ndvi_store}")
+            planes = {c: np.asarray(self.ndvi_comp[c, y0:y0 + self.ph, x0:x0 + self.pw], np.float32)
+                      for c in np.unique(comp)}
+            ndvi_raw = np.stack([planes[c] for c in comp])
         else:
             x_fast = self._read_span(t_end, cfg.fast_days, self.read_fast_idx)
         x_fast = np.nan_to_num(x_fast, nan=0.0, posinf=0.0, neginf=0.0)
