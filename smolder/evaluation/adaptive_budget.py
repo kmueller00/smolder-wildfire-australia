@@ -45,6 +45,11 @@ OUT = os.environ.get("OUT", f"adaptive_budget_{EVAL_YEAR}")
 WORKERS = int(os.environ.get("WORKERS", 16))
 SEED = int(os.environ.get("SEED", 0))                     # must match evaluate_persistence.py
 BUDGETS = [0.0006, 0.0013, 0.0023, 0.005, 0.01]
+# THRESHOLDS_FROM=<adaptive_budget json of another year>: apply its thresholds
+# (for each budget and the best F1/F2) unchanged instead of fitting them on
+# this year, e.g. thresholds chosen on 2019 applied to the test year 2020.
+# The table then reports the mean area these thresholds flag in this year.
+REF = json.load(open(os.environ["THRESHOLDS_FROM"])) if os.environ.get("THRESHOLDS_FROM") else None
 NB = 8000
 EDGES = {"SMOLDER": np.linspace(-17.0, 17.0, NB + 1), "persistence": np.linspace(-9.0, 0.5, NB + 1)}
 BAND_EDGES = [3, 10]
@@ -136,6 +141,7 @@ def main():
     n_tot = sum(r["n"] for r in res)
     daily_fire = np.array([r["fire"] for r in res])
     out = dict(eval_year=EVAL_YEAR, n_days=nd, scores=SCORES, budgets=BUDGETS, bins=NB,
+               thresholds_from=os.environ.get("THRESHOLDS_FROM") or "fitted on this year",
                fixed={}, adaptive={}, adaptive_best={})
     for name in ("persistence", "SMOLDER"):
         out["fixed"][name], out["adaptive"][name] = {}, {}
@@ -158,8 +164,12 @@ def main():
                      daily_share_p5_p50_p95_max=[float(np.percentile(ds, q)) for q in (5, 50, 95)] + [float(ds.max())],
                      daily_share_vs_daily_fire_spearman=float(spearmanr(ds, daily_fire)[0]))
             return m
+        edge = lambda thr: int(np.argmin(np.abs(EDGES[name] - thr)))
         for k in BUDGETS:
-            i = int(np.argmin(np.abs(share - k)))
+            if REF:                                   # threshold fixed on another year
+                i = edge(REF["adaptive"][name][str(k)]["threshold"])
+            else:
+                i = int(np.argmin(np.abs(share - k)))
             out["adaptive"][name][str(k)] = at(i)
         # whole threshold sweep (mean flagged area 0.01 % to 20 %), for plotting
         sel = np.nonzero((share >= 1e-4) & (share <= 0.2))[0]
@@ -173,12 +183,15 @@ def main():
         ok = share > 1e-5
         for crit, beta in (("f1", 1.0), ("f2", 2.0)):
             f = np.where(ok, (1 + beta ** 2) * prec * rec / np.maximum(beta ** 2 * prec + rec, 1e-12), 0)
-            out["adaptive_best"].setdefault(name, {})[crit] = at(int(np.argmax(f)))
+            i = edge(REF["adaptive_best"][name][crit]["threshold"]) if REF else int(np.argmax(f))
+            out["adaptive_best"].setdefault(name, {})[crit] = at(i)
     os.makedirs(os.path.dirname(OUT) or ".", exist_ok=True)
     json.dump(out, open(OUT + ".json", "w"), indent=1, default=float)
 
-    L = [f"Fixed vs adaptive daily budget, {EVAL_YEAR} ({nd} days). Adaptive: one score threshold for all days, "
-         "set so the mean flagged area equals the fixed budget.", "",
+    L = [(f"Thresholds fixed in {os.environ['THRESHOLDS_FROM']}, applied unchanged; 'mean budget' of the adaptive "
+          "rows is the area they flag in this year. ") if REF else "",
+         f"Fixed vs adaptive daily budget, {EVAL_YEAR} ({nd} days). Adaptive: one score threshold for all days"
+         + ("." if REF else ", set so the mean flagged area equals the fixed budget."), "",
          "| ranking | mean budget | rule | fire caught | precision | false alarms per hit | F2 | new-fire caught | "
          "caught 0-3 km | caught 3-10 km | caught > 10 km | daily area p5 / p50 / p95 / max |",
          "|---|---|---|---|---|---|---|---|---|---|---|---|"]
