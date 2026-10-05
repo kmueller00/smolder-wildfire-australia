@@ -3,9 +3,10 @@ BARRA-C2), written next to the existing archives without changing them.
 
 STEP=cube    cube_2020_zenodo.zarr with NDVI: every array except X is copied
              unchanged from the archived cube; X gets NDVI back at its original
-             position ([sm, wind, vpd, precip, lst_day, ndvi, lai], missing = 0
-             as in the archive). Each block is checked: the six archived
-             channels must equal the archived X exactly.
+             position ([sm, wind, vpd, precip, lst_day, ndvi, lai], values as
+             in the source cube, missing = NaN as in the archive). Each block
+             is checked: the six archived channels must equal the archived X
+             exactly (NaN where it has NaN).
 STEP=barra   barra_c2_fast.zarr cut to the days a 2020 evaluation reads
              (global day >= BARRA_FROM): the chunk files of those days are
              copied byte for byte; attribute days_present records the range.
@@ -51,7 +52,7 @@ def build_cube():
             zarr.copy(a, out, name=name)
     attrs = dict(old.attrs)
     attrs.update(channels=CHANNELS, note="Channels [sm, wind, vpd, precip, lst_day, ndvi, lai] in native units, "
-                                         "missing = 0. NDVI (channel 5) added back in v2 of this archive: the v2 "
+                                         "missing = NaN. NDVI (channel 5) added back in v2 of this archive: the v2 "
                                          "model reads it on the fast branch.")
     out.attrs.update(attrs)
     ox = old["X"]
@@ -63,13 +64,13 @@ def build_cube():
 
     def block(b0):
         b1 = min(b0 + tb, T)
-        x = np.nan_to_num(np.asarray(src["X"][b0:b1], np.float32), nan=0.0, posinf=0.0, neginf=0.0)
+        x = np.asarray(src["X"][b0:b1], np.float32)
         ref = np.asarray(ox[b0:b1])
-        if not np.array_equal(x[..., keep], ref):
-            bad = int((x[..., keep] != ref).sum())
+        if not np.array_equal(x[..., keep], ref, equal_nan=True):
+            bad = int(((x[..., keep] != ref) & ~(np.isnan(x[..., keep]) & np.isnan(ref))).sum())
             raise AssertionError(f"days {b0}-{b1}: {bad} values differ from the archived X")
         X[b0:b1] = x
-        assert np.array_equal(np.asarray(X[b0:b1]), x)
+        assert np.array_equal(np.asarray(X[b0:b1]), x, equal_nan=True)
 
     with ThreadPoolExecutor(WORKERS) as ex:
         for i, _ in enumerate(ex.map(block, range(0, T, tb))):
