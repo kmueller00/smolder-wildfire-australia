@@ -1,4 +1,4 @@
-"""Zenodo archives for the v2 model (fast stores, NDVI, 500 m LAI, FRP, fuel age,
+"""Zenodo archives for the SMOLDER model (fast stores, NDVI, 500 m LAI, FRP, fuel age,
 BARRA-C2), written next to the existing archives without changing them.
 
 STEP=cube    cube_2020_zenodo.zarr with NDVI: every array except X is copied
@@ -15,7 +15,7 @@ STEP=tar     one tar per store (the slow cube as on disk, i.e. with the
 STEP=all     all three.
 
 Usage
-  SMOLDER_DATA=... OUT_DIR=.../zenodo_v2 STEP=all python -m smolder.data.package_zenodo
+  SMOLDER_DATA=... OUT_DIR=.../zenodo_new STEP=all python -m smolder.data.package_zenodo
 """
 import hashlib
 import os
@@ -52,8 +52,8 @@ def build_cube():
             zarr.copy(a, out, name=name)
     attrs = dict(old.attrs)
     attrs.update(channels=CHANNELS, note="Channels [sm, wind, vpd, precip, lst_day, ndvi, lai] in native units, "
-                                         "missing = NaN. NDVI (channel 5) added back in v2 of this archive: the v2 "
-                                         "model reads it on the fast branch.")
+                                         "missing = NaN. NDVI (channel 5) is included because the model reads it "
+                                         "on the fast branch.")
     out.attrs.update(attrs)
     ox = old["X"]
     T, H, W, _ = ox.shape
