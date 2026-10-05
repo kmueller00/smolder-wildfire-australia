@@ -7,7 +7,22 @@ diagnostic on the selection year 2019. 2020 was not used.
 
 Code: commit `c05ed8c` (`smolder/evaluation/anomaly_feature_diagnostic.py`,
 `smolder/data/build_fire_distance.py`, `figures/make_explain_figures.py`).
-Every number below is from `results/anomaly_feature_diagnostic_2019.json`.
+The tables under Results are from the first run (`results/anomaly_feature_diagnostic_2019_gap2016.json`); the current numbers are in the next section.
+
+## Rerun after the repair of the 2016 cube (current numbers)
+
+The 2016 daily cube had empty days 163 to 365 (repaired in commit d7192f0), which also entered the 2015-2018 climatology. The diagnostic was rerun on the repaired cube; `results/anomaly_feature_diagnostic_2019.json` holds the rerun, `results/anomaly_feature_diagnostic_2019_gap2016.json` the first run that the tables further below still show. The conclusion is unchanged: `z_vpd` is the only marked feature.
+
+| Feature | Raw variable | (a) all: feature | (a) all: raw | (b) > 10 km: feature | (b) > 10 km: raw | Gain in (b) | (b) feature, first run |
+|---|---|---|---|---|---|---|---|
+| z_sm | sm | 0.578 | 0.510 | 0.567 | 0.546 | +0.021 | 0.582 |
+| z_lai | lai | 0.564 | 0.783 | 0.545 | 0.715 | -0.170 | 0.558 |
+| z_vpd | vpd | 0.583 | 0.534 | 0.618 | 0.581 | +0.037 | 0.625 |
+| z_lst | lst | 0.518 | 0.503 | 0.570 | 0.558 | +0.013 | 0.570 |
+| sm_slope_144d | sm | 0.663 | 0.510 | 0.587 | 0.546 | +0.040 | 0.587 |
+| lai_slope_144d | lai | 0.611 | 0.783 | 0.505 | 0.715 | -0.210 | 0.505 |
+| vpd_change_14d | vpd | 0.549 | 0.534 | 0.557 | 0.581 | -0.023 | 0.557 |
+| ppt_pct_144d | ppt_144d | 0.507 | 0.607 | 0.540 | 0.591 | -0.051 | 0.508 |
 
 ## Method
 
