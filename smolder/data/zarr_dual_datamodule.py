@@ -305,10 +305,19 @@ def check_checkpoint_inputs(ckpt_path: str) -> None:
             continue                                    # only matters when the model uses fuel age
         if t != getattr(now, key):
             diffs.append(f"{key}: checkpoint {t!r}, this run {getattr(now, key)!r}")
+    # statics and other inputs each script passes from these environment variables
+    for key, env in (("use_lightning", "USE_LIGHTNING"), ("use_elevation", "USE_ELEVATION"),
+                     ("use_slope_aspect", "USE_SLOPE_ASPECT"), ("use_wind_dir", "USE_WIND_DIR"),
+                     ("use_ffdi", "USE_FFDI"), ("use_fmc", "USE_FMC")):
+        t = bool(trained.get(key) or False)
+        n = os.environ.get(env, "0") == "1"
+        if t != n:
+            diffs.append(f"{key}: checkpoint {t!r}, this run {env}={int(n)}")
     if diffs:
         raise ValueError(f"{ckpt_path} was trained with other inputs ({'; '.join(diffs)}); "
                          "set VPD_SOURCE / USE_VPD_ANOMALY / PERFECT_FORECAST / USE_FRP / USE_BARRA_UV / SLOW_VEG / "
-                         "USE_FAST_NDVI / USE_FUEL_AGE / FUEL_AGE_LOOKBACK to match")
+                         "USE_FAST_NDVI / USE_FUEL_AGE / FUEL_AGE_LOOKBACK / USE_ELEVATION / USE_SLOPE_ASPECT / "
+                         "USE_LIGHTNING / USE_WIND_DIR / USE_FFDI / USE_FMC to match")
 
 
 class DualWindowDataset(Dataset):

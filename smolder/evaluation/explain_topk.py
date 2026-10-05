@@ -75,7 +75,14 @@ def main():
         slow_cube_path="cube_slow_8day.zarr", day_offset=OFFSETS[EVAL_YEAR], patch_size=PATCH,
         samples_per_epoch=N_PATCH * 3, seed=SEED, min_pos_pixels=45, pos_frac=1.0,
         deterministic=True, fire_history=True, fire_history_lags=(3, 4, 5),
-        fire_history_distance=True))
+        fire_history_distance=True,
+        # optional inputs as in evaluate_national (dynamic ones come from the environment via DualPatchConfig)
+        use_lightning=os.environ.get("USE_LIGHTNING", "0") == "1",
+        use_elevation=os.environ.get("USE_ELEVATION", "0") == "1",
+        use_slope_aspect=os.environ.get("USE_SLOPE_ASPECT", "0") == "1",
+        use_wind_dir=os.environ.get("USE_WIND_DIR", "0") == "1",
+        use_ffdi=os.environ.get("USE_FFDI", "0") == "1",
+        use_fmc=os.environ.get("USE_FMC", "0") == "1"))
     fh0 = ds.fire_hist_start_idx
     sl = {c: i for i, c in enumerate(SLOW_CHANNELS)}
     fa = {c: i for i, c in enumerate(FAST_CHANNELS)}
