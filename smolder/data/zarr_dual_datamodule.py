@@ -946,12 +946,18 @@ class DualWindowDataset(Dataset):
         """Cube channel `ch` (name, raw units) for global days, any year; zeros where no cube."""
         import datetime as _dt
         out = np.zeros((len(gdays), self.ph, self.pw), np.float32)
+        by_year = {}                                     # one read per year: each chunk decompressed once
         for k, g in enumerate(gdays):
             d = _dt.date(2015, 1, 1) + _dt.timedelta(days=int(g))
-            if d.year in self.x_by_year:
-                X, chy = self.x_by_year[d.year]
-                out[k] = np.asarray(X[d.timetuple().tm_yday - 1, y0:y0 + self.ph, x0:x0 + self.pw, chy[ch]],
-                                    np.float32)
+            by_year.setdefault(d.year, []).append((k, d.timetuple().tm_yday - 1))
+        for year, kd in by_year.items():
+            if year not in self.x_by_year:
+                continue
+            X, chy = self.x_by_year[year]
+            lo, hi = min(d for _, d in kd), max(d for _, d in kd)
+            blk = np.asarray(X[lo:hi + 1, y0:y0 + self.ph, x0:x0 + self.pw, chy[ch]], np.float32)
+            for k, d in kd:
+                out[k] = blk[d - lo]
         return np.nan_to_num(out)
 
     def _perfect_forecast(self, t_end: int, y0: int, x0: int) -> np.ndarray:
