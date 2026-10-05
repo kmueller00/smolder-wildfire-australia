@@ -10,6 +10,10 @@ STEP=cube    cube_2020_zenodo.zarr with NDVI: every array except X is copied
 STEP=barra   barra_c2_fast.zarr cut to the days a 2020 evaluation reads
              (global day >= BARRA_FROM): the chunk files of those days are
              copied byte for byte; attribute days_present records the range.
+STEP=check   2020 samples of the model's inputs built from the archives alone
+             (a directory holding only them, with the fast stores) equal those
+             built from the full data with the original stores. Inputs only;
+             no model is run.
 STEP=tar     one tar per store (the slow cube as on disk, i.e. with the
              repaired 2016 bins) and SHA256SUMS.
 STEP=all     all three.
@@ -111,6 +115,44 @@ def build_barra():
     print(f"[barra] {n} chunk files, days {BARRA_FROM}..{x.shape[0] - 1}", flush=True)
 
 
+def check(n=6):
+    import torch
+    from smolder.data.zarr_dual_datamodule import DualPatchConfig, DualWindowDataset
+    full_dir = os.environ["SMOLDER_DATA"]
+    arch = os.path.join(OUT_DIR, "check_data")
+    os.makedirs(arch, exist_ok=True)
+    links = {f"cube_{YEAR}_zenodo.zarr": os.path.join(OUT_DIR, f"cube_{YEAR}_zenodo.zarr"),
+             "barra_c2_fast.zarr": os.path.join(OUT_DIR, "barra_c2_fast.zarr")}
+    for m in ("cube_slow_8day.zarr", "cube_slow_8day_lai500m.zarr", "fire_inputs_continental.zarr"):
+        links[m] = os.path.join(full_dir, m)
+    for name, target in links.items():
+        p = os.path.join(arch, name)
+        if not os.path.islink(p):
+            os.symlink(target, p)
+    os.chdir(arch)
+    kw = dict(stats_path="channel_stats_2015_2018.json", slow_cube_path="cube_slow_8day.zarr",
+              day_offset=1826, patch_size=384, samples_per_epoch=1, seed=0, deterministic=True,
+              fire_history=True, fire_history_lags=(3, 4, 5), fire_history_distance=True,
+              use_elevation=True, use_slope_aspect=True, use_fuel_age=True, fuel_age_lookback=1095,
+              vpd_source="barra", use_frp=True, use_barra_uv=True, slow_veg="lai500", use_fast_ndvi=True,
+              perfect_forecast=False, use_vpd_anomaly=False)
+    ref = DualWindowDataset(DualPatchConfig(zarr_paths=(os.path.join(full_dir, f"cube_daily_smgrid_{YEAR}.zarr"),),
+                                            fast_stores=False, **kw))
+    os.environ["SMOLDER_DATA"] = arch
+    new = DualWindowDataset(DualPatchConfig(zarr_paths=(f"cube_{YEAR}_zenodo.zarr",), fast_stores=True, **kw))
+    os.environ["SMOLDER_DATA"] = full_dir
+    rng = np.random.default_rng(0)
+    ts = [int(ref.targets[0]), int(ref.targets[-1])] + [int(t) for t in rng.choice(ref.targets, n - 2)]
+    for t in ts:
+        y0, x0 = int(rng.integers(0, ref.H - 384)), int(rng.integers(0, ref.W - 384))
+        a, b = ref.sample_at(t, y0, x0), new.sample_at(t, y0, x0)
+        assert set(a) == set(b)
+        for k in a:
+            assert torch.equal(a[k], b[k]), (k, t, y0, x0, float((a[k].float() - b[k].float()).abs().max()))
+        print(f"  [check] t_end {t} ({y0}, {x0}): all {len(a)} tensors identical", flush=True)
+    print(f"[check] {len(ts)} samples from the archives alone equal the full-data samples", flush=True)
+
+
 def sha256(path):
     h = hashlib.sha256()
     with open(path, "rb") as fh:
@@ -140,6 +182,8 @@ def main():
         build_cube()
     if step in ("barra", "all"):
         build_barra()
+    if step in ("check", "all"):
+        check()
     if step in ("tar", "all"):
         build_tars()
 
