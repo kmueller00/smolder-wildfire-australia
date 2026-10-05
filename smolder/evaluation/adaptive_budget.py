@@ -15,7 +15,7 @@ fire pixel caught, F1/F2, new-fire recall, recall and false alarms by
 distance to the nearest fire of D-2..D (0-3, 3-10, > 10 px); for the adaptive
 rule also the spread of the daily flagged area and its rank correlation with
 the day's amount of fire. The best adaptive threshold by F1 and F2 is
-reported too.
+reported too, and the whole threshold sweep (adaptive_curve) for plotting.
 
 Scores are binned per day (NB bins: logit of the SMOLDER score,
 -log(1 + distance) for persistence), so the adaptive thresholds sit on bin
@@ -161,6 +161,13 @@ def main():
         for k in BUDGETS:
             i = int(np.argmin(np.abs(share - k)))
             out["adaptive"][name][str(k)] = at(i)
+        # whole threshold sweep (mean flagged area 0.01 % to 20 %), for plotting
+        sel = np.nonzero((share >= 1e-4) & (share <= 0.2))[0]
+        sel = sel[np.unique(np.round(np.linspace(0, len(sel) - 1, min(400, len(sel)))).astype(int))]
+        out.setdefault("adaptive_curve", {})[name] = dict(
+            mean_share=share[sel].tolist(), recall=(C["fire"][sel] / fire).tolist(),
+            fp_per_tp=((C["n"][sel] - C["fire"][sel]) / np.maximum(C["fire"][sel], 1)).tolist(),
+            **{f"recall {bn}": (C[f"fire_b{b}"][sel] / max(fire_b[b], 1)).tolist() for b, bn in enumerate(BANDS)})
         tp_all, fl_all = C["fire"].astype(float), np.maximum(C["n"], 1).astype(float)
         rec, prec = tp_all / fire, tp_all / fl_all
         ok = share > 1e-5
