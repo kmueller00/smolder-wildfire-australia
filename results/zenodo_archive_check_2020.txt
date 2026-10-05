@@ -1,0 +1,3 @@
+tests/test_archive.py on the extracted Zenodo draft 23158319 (five archives, SHA256 checked), 2026-10-05
+commit=604a0b6 dirty=0
+[archive] 349 issue days: all input tensors identical to the full data (fast stores); model output identical on 24 of them. Against the original stores: identical except BARRA channels, max |difference| 1.2e-07
