@@ -1,6 +1,10 @@
 """Zenodo archives for the SMOLDER model (fast stores, NDVI, 500 m LAI, FRP, fuel age,
 BARRA-C2), written next to the existing archives without changing them.
 
+STEP=cube    cube_2020_zenodo.zarr with only what the model reads from it:
+             X with [wind, lst_day] (copied from the archived cube and checked
+             block by block), the labels and the static layers; the slow
+             channels, VPD, lightning and the unused targets are left out.
 STEP=ndvi    ndvi_composites.zarr: NDVI of the daily cubes from global day
              NDVI_FROM to the end of 2020, one plane per distinct 8-day
              composite, and the composite of every day. The archived 2020
@@ -9,13 +13,13 @@ STEP=barra   barra_c2_fast.zarr cut to the days a 2020 evaluation reads
              (global day >= BARRA_FROM): the chunk files of those days are
              copied byte for byte; attribute days_present records the range.
 STEP=check   2020 samples of the model's inputs built from the archives alone
-             (the archived 2020 cube without NDVI, plus the stores above)
+             (the lean 2020 cube plus the stores above, no cube_slow_8day)
              (a directory holding only them, with the fast stores) equal those
              built from the full data with the original stores. Inputs only;
              no model is run.
 STEP=tar     one tar per store (the slow cube as on disk, i.e. with the
              repaired 2016 bins) and SHA256SUMS.
-STEP=all     ndvi, barra, check and tar.
+STEP=all     cube, ndvi, barra, check and tar.
 
 Usage
   SMOLDER_DATA=... OUT_DIR=.../zenodo_new STEP=all python -m smolder.data.package_zenodo
@@ -40,11 +44,44 @@ WORKERS = int(os.environ.get("WORKERS", 8))
 BARRA_FROM = int(os.environ.get("BARRA_FROM", 1824))        # 2019-12-31; must be a multiple of the chunk length
 NDVI_FROM = int(os.environ.get("NDVI_FROM", 1824))
 CHANNELS = ["sm", "wind", "vpd", "precip", "lst_day", "ndvi", "lai"]
-TARS = {"cube_slow_8day.tar": ["@cube_slow_8day.zarr"],
+TARS = {"cube_2020_zenodo.tar": ["cube_2020_zenodo.zarr"],
         "cube_slow_8day_lai500m.tar": ["@cube_slow_8day_lai500m.zarr"],
         "fire_inputs_continental.tar": ["@fire_inputs_continental.zarr"],
         "barra_c2_fast_2020.tar": ["barra_c2_fast.zarr"],     # "@": taken from SMOLDER_DATA
         "ndvi_composites_2020.tar": ["ndvi_composites.zarr"]}
+
+
+LEAN_CHANNELS = ["wind", "lst_day"]
+LEAN_DROP = {"lightning", "y_fire_8d", "y_fire_8d_trailing_backup", "y_fire_8d_valid", "y_fire_h1"}
+
+
+def build_cube():
+    old = zarr.open_group(str(resolve(f"cube_{YEAR}_zenodo.zarr")), mode="r")
+    keep = [list(old.attrs["channels"]).index(c) for c in LEAN_CHANNELS]
+    out = zarr.open_group(os.path.join(OUT_DIR, f"cube_{YEAR}_zenodo.zarr"), mode="w")
+    for name, a in old.arrays():
+        if name != "X" and name not in LEAN_DROP:
+            zarr.copy(a, out, name=name)
+    attrs = dict(old.attrs)
+    attrs.update(channels=LEAN_CHANNELS, note="Daily inputs the SMOLDER model reads from this cube: 10 m wind "
+                 "speed and land surface temperature, native units, missing = NaN. Other inputs are in the "
+                 "companion stores of this record.")
+    out.attrs.update(attrs)
+    ox = old["X"]
+    T, H, W, _ = ox.shape
+    X = out.create_dataset("X", shape=(T, H, W, len(keep)), chunks=ox.chunks[:3] + (len(keep),),
+                           dtype=np.float32, fill_value=ox.fill_value, compressor=ox.compressor)
+    tb, t0 = ox.chunks[0], time.time()
+
+    def block(b0):
+        b1 = min(b0 + tb, T)
+        x = np.asarray(ox[b0:b1], np.float32)[..., keep]
+        X[b0:b1] = x
+        assert np.array_equal(np.asarray(X[b0:b1]), x, equal_nan=True), b0
+
+    with ThreadPoolExecutor(WORKERS) as ex:
+        list(ex.map(block, range(0, T, tb)))
+    print(f"[cube] {LEAN_CHANNELS} of {T} days copied and checked ({time.time() - t0:.0f} s)", flush=True)
 
 
 def build_ndvi():
@@ -121,9 +158,9 @@ def check(n=6):
     arch = os.path.join(OUT_DIR, "check_data")
     os.makedirs(arch, exist_ok=True)
     links = {"barra_c2_fast.zarr": os.path.join(OUT_DIR, "barra_c2_fast.zarr"),
-             "ndvi_composites.zarr": os.path.join(OUT_DIR, "ndvi_composites.zarr")}
-    for m in (f"cube_{YEAR}_zenodo.zarr", "cube_slow_8day.zarr", "cube_slow_8day_lai500m.zarr",
-              "fire_inputs_continental.zarr"):
+             "ndvi_composites.zarr": os.path.join(OUT_DIR, "ndvi_composites.zarr"),
+             f"cube_{YEAR}_zenodo.zarr": os.path.join(OUT_DIR, f"cube_{YEAR}_zenodo.zarr")}
+    for m in ("cube_slow_8day_lai500m.zarr", "fire_inputs_continental.zarr"):
         links[m] = os.path.join(full_dir, m)
     for name, target in links.items():
         p = os.path.join(arch, name)
@@ -178,6 +215,8 @@ def build_tars():
 def main():
     os.makedirs(OUT_DIR, exist_ok=True)
     step = os.environ.get("STEP", "all")
+    if step in ("cube", "all"):
+        build_cube()
     if step in ("ndvi", "all"):
         build_ndvi()
     if step in ("barra", "all"):

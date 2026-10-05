@@ -357,7 +357,11 @@ class DualWindowDataset(Dataset):
         # ---- optional pre-binned slow cube ----
         self.slow_cube = None
         if cfg.slow_cube_path:
-            sc = open_zarr_root(cfg.slow_cube_path)
+            sc_path = cfg.slow_cube_path
+            if (getattr(cfg, "fast_stores", False) and getattr(cfg, "slow_veg", "lai") == "lai500"
+                    and not resolve(sc_path).exists()):
+                sc_path = cfg.slow_lai500m_store       # same bins and attributes, LAI at 500 m
+            sc = open_zarr_root(sc_path)
             # Fail loudly on any mismatch: a silently wrong bin size or channel
             # order would corrupt training without ever raising.
             if int(sc.attrs["bin_days"]) != int(cfg.slow_bin):
@@ -485,8 +489,17 @@ class DualWindowDataset(Dataset):
             cube_ch = {alias[n]: i for i, n in enumerate(names)}
         else:
             cube_ch = CH
-        self.read_slow_idx = [cube_ch[c] for c in SLOW_CHANNELS]
-        self.read_fast_idx = [cube_ch[c] for c in FAST_CHANNELS]
+        # A cube may lack channels the configured model does not read (the archived
+        # lean cube holds only LST and wind speed): the slow channels when the
+        # pre-binned slow cube is used, and VPD when it comes from BARRA-C2.
+        # Missing channels are read as 0 and must be replaced later.
+        self.read_slow_idx = [cube_ch.get(c) for c in SLOW_CHANNELS]
+        self.read_fast_idx = [cube_ch.get(c) for c in FAST_CHANNELS]
+        missing = [c for c, i in zip(FAST_CHANNELS, self.read_fast_idx) if i is None]
+        if missing and not (missing == ["VPD"] and self.vpd_source == "barra"):
+            raise ValueError(f"cube lacks fast-branch channels {missing}")
+        if None in self.read_slow_idx and self.slow_cube is None:
+            raise ValueError("cube lacks slow-branch channels and no pre-binned slow cube is given")
         self.use_fast_ndvi = bool(getattr(cfg, "use_fast_ndvi", False))
         self.read_ndvi_idx = cube_ch.get("NDVI")
         self.ndvi_comp = None
@@ -724,8 +737,15 @@ class DualWindowDataset(Dataset):
             ci, lt = self._locate(t)
             cube_end = int(self.offsets[ci]) + self.groups[ci]["X"].shape[0]
             take = min(t_end, cube_end) - t
-            arr = self.groups[ci]["X"][lt:lt + take, y0:y0 + self.ph, x0:x0 + self.pw, :]
-            parts.append(np.asarray(arr, dtype=np.float32)[..., ch_idx])
+            arr = np.asarray(self.groups[ci]["X"][lt:lt + take, y0:y0 + self.ph, x0:x0 + self.pw, :], np.float32)
+            if None in ch_idx:                                   # channel not in this cube: 0
+                part = np.zeros(arr.shape[:-1] + (len(ch_idx),), np.float32)
+                for k, c in enumerate(ch_idx):
+                    if c is not None:
+                        part[..., k] = arr[..., c]
+                parts.append(part)
+            else:
+                parts.append(arr[..., ch_idx])
             t += take
         return np.concatenate(parts, axis=0)
 
