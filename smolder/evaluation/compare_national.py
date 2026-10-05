@@ -14,7 +14,7 @@ Reads each run's national_<year>*.json and the matching *_daily.csv and writes
 
 Usage
   RUNS="persistence=results/.../national_2019_persistence.json,full=results/.../national_2019.json" \
-  REF=persistence OUT=results/experiments/v2/comparison_2019 python -m smolder.evaluation.compare_national
+  REF=persistence OUT=results/experiments/smolder/comparison_2019 python -m smolder.evaluation.compare_national
 """
 import json
 import os

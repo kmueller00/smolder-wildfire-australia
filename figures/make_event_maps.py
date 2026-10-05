@@ -3,7 +3,7 @@ where it does not -- SMOLDER and the persistence baseline side by side at the
 same national alert budget.
 
 Every ranking flags its national top 0.13 % of land pixels per issue day (SMOLDER's
-best-F2 budget, results/experiments/v2/operating_point_2019.md).
+best-F2 budget, results/experiments/smolder/operating_point_2019.md).
 For each 192 x 192 km window and day the hits, false alarms and misses of
 every ranking are counted; events are then chosen from fire-active windows
 (>= MIN_FIRE target fire pixels):
@@ -15,6 +15,8 @@ Two steps:
   python make_event_maps.py --compute   needs data + score files (SMOLDER_DATA);
                                         writes data/event_maps_2019.npz
   python make_event_maps.py             plots from that cached file only
+  python make_event_maps.py --table     per-event numbers, fixed and adaptive area
+                                        (results/experiments/smolder/event_maps_2019.json)
 """
 import os
 import sys
@@ -43,12 +45,12 @@ TITLES = {"persistence": "Persistence", "full": "SMOLDER"}
 SCORE_DIR = "/home/saturn/gwgi/gwgi107h/wildfire_data/firecastnet/experiments_scores"
 SCORES = {"full": f"{SCORE_DIR}/full_model_seed123_2019.npy"}
 
-OCEAN = "#C9D6E3"
-LAND = PANEL_BG
-RECENT = "#3A3A3A"          # fire on days D-2..D (what persistence knows)
-HIT = "#00B830"             # flagged, and fire followed
-MISS = "#C400FF"            # fire followed, not flagged
-FALSE = "#FF9F1C"           # flagged, no fire followed
+OCEAN = "#FFFFFF"
+LAND = "#ECECEE"
+RECENT = "#505055"          # fire on days D-2..D (what persistence knows)
+HIT = "#2166AC"             # flagged, and fire followed
+MISS = "#B2182B"            # fire followed, not flagged
+FALSE = "#9EC3E0"           # flagged, no fire followed
 G = {}
 
 
@@ -198,7 +200,7 @@ def plot():
                 ax.imshow(_rgb(land, recent, y, flag), cmap=cmap, vmin=-0.5, vmax=5.5, interpolation="nearest")
                 ax.set_xticks([]); ax.set_yticks([])
                 for s in ax.spines.values():
-                    s.set_color("#B0B0B4")
+                    s.set_color("#9A9AA0")
                 if col == "obs":
                     ax.set_title(f"{str(z[p + 'date'])}  ({abs(lat):.1f}°S, {lon:.1f}°E)\n"
                                  f"fire next 3 days: {n_fire:,} px", fontsize=10, color=INK, loc="left")
@@ -206,7 +208,7 @@ def plot():
                 else:
                     hit = int((flag & y).sum()); fa = int((flag & ~y).sum())
                     rec = hit / max(n_fire, 1)
-                    ax.set_title(f"{TITLES[col]}\ncaught {100 * rec:.0f} %  ·  {fa:,} false alarms",
+                    ax.set_title(f"{TITLES[col]}\ncaught {100 * rec:.0f} %, {fa:,} false alarms",
                                  fontsize=10, color=INK, loc="left")
             axes[i, 0].plot([8, 8 + 50], [S - 10, S - 10], color=INK, lw=2)
             axes[i, 0].text(8 + 25, S - 14, "50 km", ha="center", va="bottom", fontsize=8, color=INK,
@@ -216,17 +218,42 @@ def plot():
                    Patch(color=MISS, label="fire followed, not flagged (miss; left: all fire D+1..D+3)"),
                    Patch(color=FALSE, label="flagged, no fire followed (false alarm)")]
         fig.legend(handles=handles, loc="lower center", ncol=2, frameon=False, fontsize=10)
-        head = "where SMOLDER works well" if kind == "well" else "where SMOLDER works poorly"
-        fig.suptitle(f"2019 fire events {head}: top 0.13 % of land flagged per day (about 9,000 km²); "
-                     f"192 × 192 km windows", fontsize=11.5, color=INK, x=0.01, ha="left")
-        fig.tight_layout(rect=(0, 0.06, 1, 0.97))
+        fig.tight_layout(rect=(0, 0.06, 1, 1))
         fig.savefig(out, dpi=150)
         plt.close(fig)
         print("wrote", out)
 
 
+def event_table():
+    """Per event: fire caught and false alarms of each ranking at the fixed
+    0.13 % and of SMOLDER with the adaptive threshold of the same mean area
+    (results/experiments/smolder/adaptive_budget_2019.json); written next to
+    that file as event_maps_2019.json."""
+    import json
+    res = os.path.join(HERE, "..", "results", "experiments", "smolder")
+    thr = json.load(open(os.path.join(res, "adaptive_budget_2019.json")))["adaptive"]["SMOLDER"][str(BUDGET)]["threshold"]
+    z = np.load(CACHE)
+    out = dict(budget=BUDGET, adaptive_logit_threshold=thr, events={})
+    for kind in OUTS:
+        n = sum(1 for k in z.files if k.startswith(kind) and k.endswith("_meta"))
+        for i in range(n):
+            p = f"{kind}{i}_"
+            y, land = z[p + "y"], z[p + "land"]
+            pr = np.clip(z[p + "prob"].astype(np.float64), 1e-7, 1 - 1e-7)
+            flags = {n_: z[p + n_] for n_ in RANKINGS}
+            flags["full_adaptive"] = (np.log(pr / (1 - pr)) >= thr) & land
+            out["events"][f"{kind} {i + 1}"] = dict(date=str(z[p + "date"]), fire_px=int(y.sum()), **{
+                n_: dict(caught=float((f & y).sum() / max(y.sum(), 1)), false_alarms=int((f & ~y).sum()))
+                for n_, f in flags.items()})
+    path = os.path.join(res, "event_maps_2019.json")
+    json.dump(out, open(path, "w"), indent=1)
+    print("wrote", path)
+
+
 if __name__ == "__main__":
     if "--compute" in sys.argv:
         compute()
+    elif "--table" in sys.argv:
+        event_table()
     else:
         plot()

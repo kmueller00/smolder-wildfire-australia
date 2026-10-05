@@ -1,0 +1,134 @@
+{
+ "budget": 0.0013,
+ "adaptive_logit_threshold": 0.2677499999999995,
+ "events": {
+  "well 1": {
+   "date": "2019-12-20",
+   "fire_px": 595,
+   "persistence": {
+    "caught": 0.12605042016806722,
+    "false_alarms": 465
+   },
+   "full": {
+    "caught": 0.704201680672269,
+    "false_alarms": 402
+   },
+   "full_adaptive": {
+    "caught": 0.9478991596638655,
+    "false_alarms": 1408
+   }
+  },
+  "well 2": {
+   "date": "2019-11-12",
+   "fire_px": 455,
+   "persistence": {
+    "caught": 0.1934065934065934,
+    "false_alarms": 685
+   },
+   "full": {
+    "caught": 0.7758241758241758,
+    "false_alarms": 397
+   },
+   "full_adaptive": {
+    "caught": 0.9472527472527472,
+    "false_alarms": 997
+   }
+  },
+  "well 3": {
+   "date": "2019-10-20",
+   "fire_px": 712,
+   "persistence": {
+    "caught": 0.2247191011235955,
+    "false_alarms": 1061
+   },
+   "full": {
+    "caught": 0.7808988764044944,
+    "false_alarms": 568
+   },
+   "full_adaptive": {
+    "caught": 0.8764044943820225,
+    "false_alarms": 1039
+   }
+  },
+  "well 4": {
+   "date": "2019-07-23",
+   "fire_px": 429,
+   "persistence": {
+    "caught": 0.27505827505827507,
+    "false_alarms": 757
+   },
+   "full": {
+    "caught": 0.8368298368298368,
+    "false_alarms": 544
+   },
+   "full_adaptive": {
+    "caught": 0.8717948717948718,
+    "false_alarms": 734
+   }
+  },
+  "poorly 1": {
+   "date": "2019-12-29",
+   "fire_px": 5461,
+   "persistence": {
+    "caught": 0.029481779893792345,
+    "false_alarms": 314
+   },
+   "full": {
+    "caught": 0.08569859000183117,
+    "false_alarms": 486
+   },
+   "full_adaptive": {
+    "caught": 0.12012451931880608,
+    "false_alarms": 831
+   }
+  },
+  "poorly 2": {
+   "date": "2019-11-06",
+   "fire_px": 4414,
+   "persistence": {
+    "caught": 0.13275940190303578,
+    "false_alarms": 315
+   },
+   "full": {
+    "caught": 0.18418667874943362,
+    "false_alarms": 345
+   },
+   "full_adaptive": {
+    "caught": 0.21748980516538288,
+    "false_alarms": 477
+   }
+  },
+  "poorly 3": {
+   "date": "2019-06-18",
+   "fire_px": 1587,
+   "persistence": {
+    "caught": 0.0945179584120983,
+    "false_alarms": 584
+   },
+   "full": {
+    "caught": 0.14177693761814744,
+    "false_alarms": 1030
+   },
+   "full_adaptive": {
+    "caught": 0.13295526149968495,
+    "false_alarms": 810
+   }
+  },
+  "poorly 4": {
+   "date": "2019-12-26",
+   "fire_px": 1515,
+   "persistence": {
+    "caught": 0.033003300330033,
+    "false_alarms": 427
+   },
+   "full": {
+    "caught": 0.09108910891089109,
+    "false_alarms": 196
+   },
+   "full_adaptive": {
+    "caught": 0.23366336633663368,
+    "false_alarms": 631
+   }
+  }
+ }
+}

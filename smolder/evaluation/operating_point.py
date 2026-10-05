@@ -19,7 +19,7 @@ persistence score carries its own random tie-break).
 
 Usage
   SMOLDER_DATA=... EVAL_YEAR=2019 SCORES="released=/p/a.npy,full=/p/b.npy" \\
-      OUT=results/experiments/v2/operating_point_2019 python -m smolder.evaluation.operating_point
+      OUT=results/experiments/smolder/operating_point_2019 python -m smolder.evaluation.operating_point
 CPU only.
 """
 import json

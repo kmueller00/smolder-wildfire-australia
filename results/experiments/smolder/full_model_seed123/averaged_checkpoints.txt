@@ -1,0 +1,3 @@
+best-epoch=23-val_ap=0.1997.ckpt
+best-epoch=26-val_ap=0.1993.ckpt
+best-epoch=25-val_ap=0.1991.ckpt

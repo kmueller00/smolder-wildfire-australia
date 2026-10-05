@@ -2,7 +2,7 @@
  "runs": {
   "persistence": "results/experiments/stage0/persistence_2019/national_2019_persistence.json",
   "released": "results/experiments/stage0/national_2019/national_2019.json",
-  "full_s123": "results/experiments/v2/full_model_seed123/national_2019.json"
+  "full_s123": "results/experiments/smolder/full_model_seed123/national_2019.json"
  },
  "reference": "persistence",
  "metrics": {

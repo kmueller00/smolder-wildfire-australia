@@ -23,7 +23,7 @@ edges and the realised mean area is reported next to the target.
 
 Usage
   SMOLDER_DATA=... EVAL_YEAR=2019 SCORES=/p/full_model_seed123_2019.npy \\
-      OUT=results/experiments/v2/adaptive_budget_2019 python -m smolder.evaluation.adaptive_budget
+      OUT=results/experiments/smolder/adaptive_budget_2019 python -m smolder.evaluation.adaptive_budget
 CPU only.
 """
 import json
