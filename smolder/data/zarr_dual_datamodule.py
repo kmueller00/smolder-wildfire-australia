@@ -393,12 +393,15 @@ class DualWindowDataset(Dataset):
         assert self.vpd_source in ("montes", "barra"), self.vpd_source
         self.slow_veg = str(getattr(cfg, "slow_veg", "lai"))
         assert self.slow_veg in ("lai", "ndvi", "lai+ndvi", "lai500"), self.slow_veg
+        fast = bool(getattr(cfg, "fast_stores", False))   # inputs from build_fast_stores only
         if self.slow_veg == "lai500":
             # HiQ-LAI 500 m averaged to 1 km (build_lai500_slow) in place of the 5 km LAI
             assert self.slow_cube is not None, "slow_veg needs the pre-binned slow cube"
-            lg = open_zarr_root(getattr(cfg, "lai500_slow_store", "cube_slow_8day_lai500.zarr"))
-            assert np.array_equal(np.asarray(lg["bin_start_day"][...]), self.slow_bin_start), "LAI500 bins differ"
-            self.lai500_slow = lg["X_slow"]
+            self.lai500_slow = None                         # fast stores: merged slow store, opened below
+            if not fast:
+                lg = open_zarr_root(getattr(cfg, "lai500_slow_store", "cube_slow_8day_lai500.zarr"))
+                assert np.array_equal(np.asarray(lg["bin_start_day"][...]), self.slow_bin_start), "LAI500 bins differ"
+                self.lai500_slow = lg["X_slow"]
         elif self.slow_veg != "lai":
             assert self.slow_cube is not None, "slow_veg needs the pre-binned slow cube"
             ng = open_zarr_root(getattr(cfg, "ndvi_slow_store", "cube_slow_8day_ndvi.zarr"))
@@ -406,12 +409,16 @@ class DualWindowDataset(Dataset):
             self.ndvi_slow = ng["X_slow"]
         self.use_frp = bool(getattr(cfg, "use_frp", False))
         self.use_barra_uv = bool(getattr(cfg, "use_barra_uv", False))
-        if self.use_frp:
+        if self.use_frp and not fast:                        # fast stores: frp_feat of the fire store
             self.firms = open_zarr_root(getattr(cfg, "firms_store", "firms_daily.zarr"))
         if self.use_barra_uv and getattr(cfg, "augment", False):
             raise ValueError("use_barra_uv carries absolute wind directions, which flips/rotations do not correct")
         if self.vpd_source == "barra" or self.perfect_forecast or self.use_barra_uv:
-            self.barra = open_zarr_root(getattr(cfg, "barra_store", "barra_c2_daily.zarr"))
+            # fast stores: grid and statistics from barra_c2_fast.zarr; the full store is
+            # only needed for the variables it alone holds (perfect forecast, VPD climatology)
+            only_fast = fast and not (self.perfect_forecast or getattr(cfg, "use_vpd_anomaly", False))
+            self.barra = open_zarr_root(cfg.barra_fast_store if only_fast
+                                        else getattr(cfg, "barra_store", "barra_c2_daily.zarr"))
             self.barra_lat = np.asarray(self.barra["lat"][...])
             self.barra_lon = np.asarray(self.barra["lon"][...])
             self.barra_stats = dict(self.barra.attrs["stats_2015_2018"])
@@ -629,6 +636,8 @@ class DualWindowDataset(Dataset):
                 assert np.array_equal(np.asarray(bf["lat"][...]), self.barra_lat)
                 assert np.array_equal(np.asarray(bf["lon"][...]), self.barra_lon)
                 self.barra_fast = bf["x"]
+                # a store cut to part of the period records the global days it holds
+                self._barra_days = tuple(bf.attrs.get("days_present", (0, self.barra_fast.shape[0])))
             if self.slow_veg == "lai500":            # LAI500, SM, PPT in one array
                 sg = open_zarr_root(cfg.slow_lai500m_store)
                 assert np.array_equal(np.asarray(sg["bin_start_day"][...]), self.slow_bin_start)
@@ -837,6 +846,10 @@ class DualWindowDataset(Dataset):
         for the day range (kept for the next variable of the same sample), and
         bilinear interpolation as A_lat @ field @ A_lon^T."""
         gdays = list(gdays)
+        lo, hi = self._barra_days
+        if not (lo <= gdays[0] and gdays[-1] < hi):
+            raise ValueError(f"BARRA days {gdays[0]}..{gdays[-1]} outside {self.cfg.barra_fast_store} "
+                             f"(holds global days {lo}..{hi - 1})")
         key = (gdays[0], gdays[-1], y0, x0)
         if self._bcache_key != key:
             c0, a, f0, e = self._GT
