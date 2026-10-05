@@ -202,6 +202,9 @@ def build_tars():
     sums = []
     for tar, members in TARS.items():
         dst = os.path.join(OUT_DIR, tar)
+        if os.path.exists(dst) and os.environ.get("REBUILD_TARS", "0") != "1":
+            print(f"[tar] {tar} exists, kept", flush=True)
+            members = []                                      # REBUILD_TARS=1 writes it again
         for m in members:
             base = str(resolve(m[1:])) if m.startswith("@") else os.path.join(OUT_DIR, m)
             t0 = time.time()
