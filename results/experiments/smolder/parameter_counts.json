@@ -1,0 +1,25 @@
+{
+ "published model (checkpoints/smolder_swa.ckpt)": {
+  "checkpoint": "checkpoints/smolder_swa.ckpt",
+  "input_dim_slow": 7,
+  "input_dim_fast": 11,
+  "network": 1082881,
+  "embeddings": 2560,
+  "trainable": 1085441
+ },
+ "retrained, reference run 1831072": {
+  "checkpoint": "/home/saturn/gwgi/gwgi107h/wildfire_data/checkpoints/experiments/v2/full_model_seed123/job_1831072/swa.ckpt",
+  "input_dim_slow": 11,
+  "input_dim_fast": 22,
+  "network": 1178881,
+  "embeddings": 2560,
+  "trainable": 1181441
+ },
+ "retrained with downwind alignment (23 fast channels, not trained yet)": {
+  "input_dim_slow": 11,
+  "input_dim_fast": 23,
+  "network": 1185281,
+  "embeddings": 2560,
+  "trainable": 1187841
+ }
+}
