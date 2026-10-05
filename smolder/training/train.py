@@ -148,6 +148,7 @@ def main():
         perfect_forecast=os.environ.get("PERFECT_FORECAST", "0") == "1",
         use_frp=os.environ.get("USE_FRP", "0") == "1",
         use_barra_uv=os.environ.get("USE_BARRA_UV", "0") == "1",
+        use_wind_align=os.environ.get("USE_WIND_ALIGN", "0") == "1",
         slow_veg=os.environ.get("SLOW_VEG", "lai"),
         use_fast_ndvi=os.environ.get("USE_FAST_NDVI", "0") == "1",
         compact_statics=os.environ.get("COMPACT_STATICS", "0") == "1",

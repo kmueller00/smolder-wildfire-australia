@@ -111,7 +111,7 @@ def main():
     if ds.use_vpd_anomaly:
         GROUPS.insert(6, ("VPD anomaly", [("f", lay["fast"]["VPD anomaly"])], None))
     for name, label in (("fire radiative power", "fire radiative power"), ("wind u/v", "wind direction (u, v)"),
-                        ("fuel age", "fuel age")):
+                        ("fuel age", "fuel age"), ("downwind alignment", "downwind alignment")):
         if name in lay["fast"]:
             GROUPS.append((label, [("f", lay["fast"][name])], None))
     for name in ("elevation", "slope", "aspect", "lightning"):     # statics: in both branches

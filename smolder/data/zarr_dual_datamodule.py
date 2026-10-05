@@ -204,6 +204,13 @@ class DualPatchConfig:
     # fast day as 2 fast-branch channels, normalized with the store's
     # 2015-2018 statistics. Absolute directions: incompatible with augment.
     use_barra_uv: bool = field(default_factory=lambda: os.environ.get("USE_BARRA_UV", "0") == "1")
+    # Downwind alignment as the LAST fast-branch channel: for every fast step s
+    # and pixel, the cosine of the angle between that day's BARRA-C2 10 m mean
+    # wind at the pixel and the direction from the nearest fire of y_fire_3d[s-3]
+    # (days s-2..s, the newest fire history) to the pixel: +1 downwind, -1
+    # upwind, 0 crosswind; 0 at burning pixels and without fire in the patch.
+    # Uses no information after day s. Blanked by fire_history_dropout_prob.
+    use_wind_align: bool = field(default_factory=lambda: os.environ.get("USE_WIND_ALIGN", "0") == "1")
     # Vegetation in the slow branch: "lai" (HiQ-LAI 5 km, default), "ndvi"
     # (MODIS 500 m NDVI from the cubes in place of LAI) or "lai+ndvi" (NDVI as
     # an extra slow channel, appended last so no other channel moves). NDVI
@@ -302,7 +309,8 @@ def check_checkpoint_inputs(ckpt_path: str) -> None:
     diffs = []
     for key, default in (("vpd_source", "montes"), ("use_vpd_anomaly", False), ("perfect_forecast", False),
                          ("use_frp", False), ("use_barra_uv", False), ("slow_veg", "lai"),
-                         ("use_fast_ndvi", False), ("use_fuel_age", False), ("fuel_age_lookback", 250)):
+                         ("use_fast_ndvi", False), ("use_fuel_age", False), ("fuel_age_lookback", 250),
+                         ("use_wind_align", False)):
         t = trained.get(key)
         t = default if t is None else t
         if key == "fuel_age_lookback" and not (trained.get("use_fuel_age") or False):
@@ -320,7 +328,7 @@ def check_checkpoint_inputs(ckpt_path: str) -> None:
     if diffs:
         raise ValueError(f"{ckpt_path} was trained with other inputs ({'; '.join(diffs)}); "
                          "set VPD_SOURCE / USE_VPD_ANOMALY / PERFECT_FORECAST / USE_FRP / USE_BARRA_UV / SLOW_VEG / "
-                         "USE_FAST_NDVI / USE_FUEL_AGE / FUEL_AGE_LOOKBACK / USE_ELEVATION / USE_SLOPE_ASPECT / "
+                         "USE_FAST_NDVI / USE_FUEL_AGE / FUEL_AGE_LOOKBACK / USE_WIND_ALIGN / USE_ELEVATION / USE_SLOPE_ASPECT / "
                          "USE_LIGHTNING / USE_WIND_DIR / USE_FFDI / USE_FMC to match")
 
 
@@ -413,11 +421,12 @@ class DualWindowDataset(Dataset):
             self.ndvi_slow = ng["X_slow"]
         self.use_frp = bool(getattr(cfg, "use_frp", False))
         self.use_barra_uv = bool(getattr(cfg, "use_barra_uv", False))
+        self.use_wind_align = bool(getattr(cfg, "use_wind_align", False))
         if self.use_frp and not fast:                        # fast stores: frp_feat of the fire store
             self.firms = open_zarr_root(getattr(cfg, "firms_store", "firms_daily.zarr"))
         if self.use_barra_uv and getattr(cfg, "augment", False):
             raise ValueError("use_barra_uv carries absolute wind directions, which flips/rotations do not correct")
-        if self.vpd_source == "barra" or self.perfect_forecast or self.use_barra_uv:
+        if self.vpd_source == "barra" or self.perfect_forecast or self.use_barra_uv or self.use_wind_align:
             # fast stores: grid and statistics from barra_c2_fast.zarr; the full store is
             # only needed for the variables it alone holds (perfect forecast, VPD climatology)
             only_fast = fast and not (self.perfect_forecast or getattr(cfg, "use_vpd_anomaly", False))
@@ -879,6 +888,28 @@ class DualWindowDataset(Dataset):
             return np.stack([map_coordinates(d, [FI, FJ], order=1, mode="nearest") for d in w])
         return (Ar[None] @ w.astype(np.float64) @ Ak.T[None]).astype(np.float32)
 
+    def _wind_align(self, t_end, y0, x0, steps, recent_fire, lm_p) -> np.ndarray:
+        """(T, H, W, 1): cos(angle between the day's 10 m wind and the direction
+        from the nearest recent fire to the pixel), see DualPatchConfig.use_wind_align."""
+        from scipy import ndimage as _ndi
+        T = len(steps)
+        g0 = t_end - T + int(self.cfg.day_offset)
+        u = np.nan_to_num(self._barra_patch("uas", range(g0, g0 + T), y0, x0))     # eastward
+        v = np.nan_to_num(self._barra_patch("vas", range(g0, g0 + T), y0, x0))     # northward
+        rr, cc = np.meshgrid(np.arange(self.ph), np.arange(self.pw), indexing="ij")
+        out = np.zeros((T, self.ph, self.pw, 1), np.float32)
+        for j, s_j in enumerate(steps):
+            fire = recent_fire(s_j)
+            if not fire.any():
+                continue
+            dist, (nr, nc) = _ndi.distance_transform_edt(~fire, return_indices=True)
+            de = (cc - nc).astype(np.float32)                   # fire -> pixel, east
+            dn = (nr - rr).astype(np.float32)                   # fire -> pixel, north (rows grow southward)
+            norm = np.hypot(de, dn) * np.hypot(u[j], v[j])
+            a = (u[j] * de + v[j] * dn) / np.maximum(norm, 1e-6)
+            out[j, :, :, 0] = np.where((dist > 0) & (norm > 1e-6), a, 0.0) * (lm_p > 0)
+        return out
+
     def _barra_static(self, name: str, y0: int, x0: int) -> np.ndarray:
         """A (k, lat, lon) array of the BARRA store, bilinearly interpolated to the patch."""
         from scipy.ndimage import map_coordinates
@@ -970,7 +1001,8 @@ class DualWindowDataset(Dataset):
             + ["FFDI"] * (2 * int(self.use_ffdi)) + ["FMC"] * (2 * int(self.use_fmc)) \
             + ["fire radiative power"] * (3 * int(self.use_frp)) + ["wind u/v"] * (2 * int(self.use_barra_uv)) \
             + ["NDVI (fast)"] * int(self.use_fast_ndvi) + ["VPD anomaly"] * int(self.use_vpd_anomaly) \
-            + ["perfect forecast"] * (5 * int(self.perfect_forecast))
+            + ["perfect forecast"] * (5 * int(self.perfect_forecast)) \
+            + ["downwind alignment"] * int(self.use_wind_align)
         out = {}
         for key, names in (("slow", slow), ("fast", fast)):
             d: Dict[str, List[int]] = {}
@@ -1306,6 +1338,11 @@ class DualWindowDataset(Dataset):
         if self.perfect_forecast:
             x_fast = np.concatenate([x_fast, self._perfect_forecast(t_end, y0, x0)], axis=-1)
 
+        wind_align_idx = None
+        if self.use_wind_align:
+            wind_align_idx = x_fast.shape[-1]
+            x_fast = np.concatenate([x_fast, self._wind_align(t_end, y0, x0, steps, _recent_fire, lm_p)], axis=-1)
+
         # Fire-history feature dropout (TRAIN only): blank fire_hist_t-3/4/5 +
         # fire_dist to 0 for this sample with probability fire_history_dropout_
         # prob, forcing the network to predict from weather/terrain alone when
@@ -1320,6 +1357,8 @@ class DualWindowDataset(Dataset):
                 x_fast[..., frp_slice] = 0.0
             if fuel_age_idx is not None:                         # ages of a few days are fire history too
                 x_fast[..., fuel_age_idx] = 1.0                   # = the cap: "long unburned"
+            if wind_align_idx is not None:                       # derived from the fire history
+                x_fast[..., wind_align_idx] = 0.0
 
         if not hasattr(self, "_layout_n"):
             self._layout_n = self.channel_layout()["n"]
@@ -1462,6 +1501,7 @@ class DualDataModule(pl.LightningDataModule):
         use_vpd_anomaly: bool = False,
         use_frp: bool = False,
         use_barra_uv: bool = False,
+        use_wind_align: bool = False,
         slow_veg: str = "lai",
         use_fast_ndvi: bool = False,
         vpd_source: str = "montes",
@@ -1524,7 +1564,8 @@ class DualDataModule(pl.LightningDataModule):
             past_fire_dist_store=h.past_fire_dist_store,
             use_vpd_anomaly=h.use_vpd_anomaly,
             vpd_source=h.vpd_source, perfect_forecast=h.perfect_forecast,
-            use_frp=h.use_frp, use_barra_uv=h.use_barra_uv, slow_veg=h.slow_veg, use_fast_ndvi=h.use_fast_ndvi,
+            use_frp=h.use_frp, use_barra_uv=h.use_barra_uv, use_wind_align=h.use_wind_align,
+            slow_veg=h.slow_veg, use_fast_ndvi=h.use_fast_ndvi,
             compact_statics=h.compact_statics,
         ))
         self.val_ds = DualWindowDataset(DualPatchConfig(
@@ -1551,7 +1592,8 @@ class DualDataModule(pl.LightningDataModule):
             augment=False,   # val is always deterministic/unaugmented, regardless of h.augment
             use_vpd_anomaly=h.use_vpd_anomaly,
             vpd_source=h.vpd_source, perfect_forecast=h.perfect_forecast,
-            use_frp=h.use_frp, use_barra_uv=h.use_barra_uv, slow_veg=h.slow_veg, use_fast_ndvi=h.use_fast_ndvi,
+            use_frp=h.use_frp, use_barra_uv=h.use_barra_uv, use_wind_align=h.use_wind_align,
+            slow_veg=h.slow_veg, use_fast_ndvi=h.use_fast_ndvi,
             fire_history_dropout_prob=0.0,  # val must see the real fire-history signal always
             compact_statics=h.compact_statics,
         ))
