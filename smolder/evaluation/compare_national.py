@@ -7,7 +7,10 @@ Reads each run's national_<year>*.json and the matching *_daily.csv and writes
   - mean daily AUC-PR and lift
   - per run against the reference: share of days won (daily AUC-PR, lift at
     0.5 % and 1 %, new-fire capture at 1 %) and a day-bootstrap 95 % interval
-    of the mean daily difference.
+    of the mean daily difference
+  - false alarms per detected fire pixel at each budget, and the budget (and
+    change in false alarms) each run needs to capture as much fire as the
+    reference does at that budget.
 
 Usage
   RUNS="persistence=results/.../national_2019_persistence.json,full=results/.../national_2019.json" \
@@ -63,6 +66,23 @@ def main():
             v[c] = dict(days_won=float((diff > 0).mean()), mean_diff=float(diff.mean()),
                         ci95=[float(np.percentile(boot, 2.5)), float(np.percentile(boot, 97.5))])
         res["vs_reference"][n] = v
+    # false alarms: per detected fire pixel at each budget, and at the reference's capture
+    br = data[ref][0]["base_rate"]
+    res["false_alarms"] = {}
+    for n, (d, _) in data.items():
+        tk = sorted(d["topk_national"], key=lambda r: r["k"])
+        lk, tp = np.log([r["k"] for r in tk]), np.array([r["tpr"] for r in tk])
+        fa = {}
+        for k in KS:
+            t = topk(d, k)
+            fa[f"fp_per_tp_{k}"] = (1.0 - t["precision"]) / t["precision"]
+            if n != ref:
+                c = topk(data[ref][0], k)["tpr"]                   # reference capture at k
+                if tp[0] <= c <= tp[-1]:
+                    kn = float(np.exp(np.interp(c, tp, lk)))       # budget this run needs for it
+                    fa[f"budget_for_ref_capture_{k}"] = kn
+                    fa[f"fp_change_at_ref_capture_{k}"] = (kn - c * br) / (k - c * br) - 1.0
+        res["false_alarms"][n] = fa
     os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
     json.dump(res, open(out + ".json", "w"), indent=1)
 
@@ -82,6 +102,23 @@ def main():
             s = v[c]
             lines.append(f"| {n} | {c} | {100 * s['days_won']:.0f} % | {s['mean_diff']:+.4g} | "
                          f"[{s['ci95'][0]:+.4g}, {s['ci95'][1]:+.4g}] |")
+    lines += ["", "False alarms per detected fire pixel at each budget (top k % of land pixels):", "",
+              "| budget | " + " | ".join(names) + " |", "|---|" + "---|" * len(names)]
+    for k in KS:
+        lines.append(f"| top {100 * k:g} % | " + " | ".join(
+            f"{res['false_alarms'][n][f'fp_per_tp_{k}']:.1f}" for n in names) + " |")
+    lines += ["", f"Budget needed to capture as much fire as {ref} does with the top k % "
+              "(TPR interpolated linearly in log k between evaluated budgets), and the change in false alarms:", "",
+              "| run | ref budget | ref capture | budget needed | false alarms |", "|---|---|---|---|---|"]
+    for n in names:
+        if n == ref:
+            continue
+        for k in KS:
+            fa = res["false_alarms"][n]
+            if f"budget_for_ref_capture_{k}" in fa:
+                lines.append(f"| {n} | {100 * k:g} % | {topk(data[ref][0], k)['tpr']:.3f} | "
+                             f"{100 * fa[f'budget_for_ref_capture_{k}']:.3g} % | "
+                             f"{100 * fa[f'fp_change_at_ref_capture_{k}']:+.0f} % |")
     open(out + ".md", "w").write("\n".join(lines) + "\n")
     print("\n".join(lines))
 
