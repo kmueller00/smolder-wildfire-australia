@@ -6,14 +6,22 @@ composite named by its start date (YYYYMMDD), LAI x 100 as uint16, 65535 =
 no valid 500 m pixel. If a file carries no band names, composite k of a year
 is taken to start on day of year 1 + 8k (the MODIS 8-day calendar).
 
-Daily values are built the way the cube's 5 km LAI was (checked on 2016:
-identical to the source): each day takes the newest composite that starts
-on or before it. These are averaged over the slow cube's 8-day bins and
-written to cube_slow_8day_lai500.zarr (X_slow (n_bins, H, W, 1), same
-bin_start_day as cube_slow_8day.zarr), used by SLOW_VEG=lai500.
+Daily values: each day d takes the newest composite that starts on or
+before d - LAG (default 31). HiQ-LAI smooths every composite with the three
+composites before and after it (Yan et al. 2024, exponential smoothing,
+half-length 3), so a composite starting on c holds observations up to
+c + 8 + 3 * 8 - 1 = c + 31. With LAG = 31 nothing after day d enters day d.
+(LAG = 0 reproduces the earlier store, which took the newest composite
+starting on or before d and so reached up to 31 days past d.) Days without
+a composite that old (the first LAG days of 2015) are left out of their
+8-day average; first_full_bin records the first average with every day
+covered, and the datamodule uses no window that reaches before it. The daily
+values are averaged over the slow cube's 8-day bins and written to OUT
+(X_slow (n_bins, H, W, 1), same bin_start_day as cube_slow_8day.zarr).
 
 Usage
-  LAI_DIR=.../lai/HiQ_LAI_1km SMOLDER_DATA=... python -m smolder.data.build_lai500_slow
+  LAI_DIR=.../lai/HiQ_LAI_1km SMOLDER_DATA=... OUT=cube_slow_8day_lai500_lag31.zarr \
+      python -m smolder.data.build_lai500_slow
   CHECK_ONLY=1 ... only reads the files and prints bands, dates, value ranges
 """
 import datetime as dt
@@ -27,7 +35,8 @@ import zarr
 from smolder.data.io import open_zarr_root, resolve
 
 LAI_DIR = os.environ.get("LAI_DIR", "/home/saturn/gwgi/gwgi107h/wildfire_data/lai/HiQ_LAI_1km")
-OUT = os.environ.get("OUT", "cube_slow_8day_lai500.zarr")
+OUT = os.environ.get("OUT", "cube_slow_8day_lai500_lag31.zarr")
+LAG = int(os.environ.get("LAG", 31))
 START = dt.date(2015, 1, 1)
 GT = (112.904998779, 0.009997566018978103, -9.005000113999998, -0.009997121616580312)
 H, W = 3474, 4110
@@ -77,24 +86,32 @@ def main():
     root = zarr.open_group(str(resolve(OUT)), mode="w")
     z = root.create_dataset("X_slow", shape=(n_bins, H, W, 1), chunks=(1, 512, 512, 1), dtype="f4")
     root["bin_start_day"] = starts
-    root.attrs.update(channels=["LAI500"], agg=["mean"], bin_days=bin_days, source="HiQ-LAI 500 m via GEE, mean to 1 km")
     cstarts = [(c[0] - START).days for c in comp]
     cache = {}
+    first_full = None
     for b, s in enumerate(starts):
         days = range(int(s), int(s) + bin_days)
         acc = np.zeros((H, W), np.float64)
+        n_cov = 0
         for g in days:
-            k = int(np.searchsorted(cstarts, g, side="right")) - 1     # newest composite starting <= day
+            k = int(np.searchsorted(cstarts, g - LAG, side="right")) - 1   # newest composite starting <= day - LAG
             if k < 0:
                 continue
+            assert cstarts[k] + LAG <= g, (g, cstarts[k])
             if k not in cache:
                 cache.clear()
                 cache[k] = read(comp[k][1], comp[k][2])
-            acc += np.nan_to_num(cache[k])                             # as build_slow_cube: missing day = 0
-        z[b] = (acc / bin_days).astype(np.float32)[..., None]
+            acc += np.nan_to_num(cache[k])                             # as build_slow_cube: missing pixel = 0
+            n_cov += 1
+        if n_cov == bin_days and first_full is None:
+            first_full = b
+        z[b] = (acc / max(n_cov, 1)).astype(np.float32)[..., None]
         if b % 20 == 0:
-            print(f"  bin {b}/{n_bins}", flush=True)
-    print(f"[lai500] wrote {OUT}")
+            print(f"  bin {b}/{n_bins} ({n_cov} days covered)", flush=True)
+    root.attrs.update(channels=["LAI500"], agg=["mean"], bin_days=bin_days, lag_days=LAG, first_full_bin=int(first_full),
+                      source="HiQ-LAI 500 m via GEE, mean to 1 km",
+                      rule=f"day d takes the newest composite starting on or before d - {LAG}")
+    print(f"[lai500] wrote {OUT}, lag {LAG} days, first fully covered bin {first_full}")
 
 
 if __name__ == "__main__":

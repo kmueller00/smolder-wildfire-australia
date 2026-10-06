@@ -17,12 +17,12 @@ datamodule reads them instead of summing three days per step.
         datamodule computed them: log1p(sum FRP)/5, log1p(sum detections)/3,
         night share (0 without detections). Days 0-1 use the days available.
   barra_c2_fast.zarr
-    x (2223, lat, lon, 3) float16 [vpd, uas, vas], chunks (32, 128, 128, 3)
-        barra_c2_daily.zarr, the three fast-branch variables in one array
-  cube_slow_8day_lai500m.zarr
+    x (2223, lat, lon, 4) float16 [vpd, uas, vas, tasmax], chunks (32, 128, 128, 4)
+        barra_c2_daily.zarr, the fast-branch variables in one array
+  cube_slow_8day_lai500m_lag31.zarr (SLOW_STORE)
     X_slow (274, H, W, 3) float32 [LAI, SM, PPT], chunks (16, 256, 256, 3)
-        cube_slow_8day.zarr with LAI replaced by cube_slow_8day_lai500.zarr
-        (HiQ-LAI 500 m), what SLOW_VEG=lai500 reads
+        cube_slow_8day.zarr with LAI replaced by LAI_STORE
+        (cube_slow_8day_lai500_lag31.zarr: HiQ-LAI 500 m, 31-day lag)
 
 Every block is written whole and then read back and compared with its source
 (VERIFY=1, the default).
@@ -50,9 +50,10 @@ INT_COMP = Blosc(cname="zstd", clevel=3, shuffle=Blosc.BITSHUFFLE)
 FLT_COMP = Blosc(cname="zstd", clevel=3, shuffle=Blosc.SHUFFLE)
 
 FIRE_STORE = "fire_inputs_continental.zarr"
-BARRA_STORE = "barra_c2_fast.zarr"
-SLOW_STORE = "cube_slow_8day_lai500m.zarr"
-BARRA_VARS = ["vpd", "uas", "vas"]
+BARRA_STORE = os.environ.get("BARRA_STORE", "barra_c2_fast_tmax.zarr")
+SLOW_STORE = os.environ.get("SLOW_STORE", "cube_slow_8day_lai500m_lag31.zarr")
+LAI_STORE = os.environ.get("LAI_STORE", "cube_slow_8day_lai500_lag31.zarr")
+BARRA_VARS = ["vpd", "uas", "vas", "tasmax"]
 
 
 def frp_features(frp, nd, nn):
@@ -138,7 +139,7 @@ def build_barra():
     src = open_zarr_root("barra_c2_daily.zarr")
     n, nl, nk = src["vpd"].shape
     root = zarr.open_group(str(resolve(BARRA_STORE)), mode="w")
-    z = root.create_dataset("x", shape=(n, nl, nk, 3), chunks=(32, 128, 128, 3), dtype=np.float16,
+    z = root.create_dataset("x", shape=(n, nl, nk, len(BARRA_VARS)), chunks=(32, 128, 128, len(BARRA_VARS)), dtype=np.float16,
                             fill_value=np.nan, compressor=INT_COMP)
     root["lat"] = np.asarray(src["lat"][...])
     root["lon"] = np.asarray(src["lon"][...])
@@ -161,7 +162,7 @@ def build_barra():
 
 def build_slow():
     sc = open_zarr_root("cube_slow_8day.zarr")
-    lg = open_zarr_root("cube_slow_8day_lai500.zarr")
+    lg = open_zarr_root(LAI_STORE)
     starts = np.asarray(sc["bin_start_day"][...])
     assert np.array_equal(np.asarray(lg["bin_start_day"][...]), starts)
     assert list(sc.attrs["channels"]) == ["LAI", "SM", "PPT"], sc.attrs["channels"]
@@ -173,8 +174,8 @@ def build_slow():
     root["bin_start_day"] = starts
     root["year_of_bin"] = np.asarray(sc["year_of_bin"][...])
     root.attrs.update(dict(sc.attrs))
-    root.attrs.update(lai_source="cube_slow_8day_lai500.zarr (HiQ-LAI 500 m, mean to 1 km)",
-                      sm_ppt_source="cube_slow_8day.zarr")
+    root.attrs.update(lai_source=f"{LAI_STORE} (HiQ-LAI 500 m, mean to 1 km)", sm_ppt_source="cube_slow_8day.zarr",
+                      lag_days=int(lg.attrs.get("lag_days", 0)), first_full_bin=int(lg.attrs.get("first_full_bin", 0)))
 
     def block(b0):
         b1 = min(b0 + TB, n)

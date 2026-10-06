@@ -92,7 +92,8 @@ def main():
         ("soil moisture", [("s", [sl["SM"]])], None),
         ("precipitation", [("s", [sl["PPT"]])], None),
         ("vapour pressure deficit", [("f", [fa["VPD"]])], None),
-        ("land surface temperature", [("f", [fa["LST"]])], None),
+        ("maximum air temperature" if getattr(ds, "causal", False) else "land surface temperature",
+         [("f", [fa["LST"]])], None),                      # causal_inputs: BARRA-C2 tasmax in the LST slot
         ("wind speed", [("f", [fa["WIND"]])], None),
         ("fire history", [("f", list(range(fh0, fh0 + ds.n_fire_hist_channels)))], None),
         ("biomass", [("s", [len(SLOW_CHANNELS)]), ("f", [len(FAST_CHANNELS)])], None),
@@ -222,7 +223,9 @@ def main():
                     soil_moisture=float(sm_traj[-1]), lai=float(lai_traj[-1]),
                     precip_32d=float(ppt_traj[-4:].sum()),
                     vpd_7d=float(vpd[-7:].mean()),
-                    lst_7d=float(denorm(fast[-7:, a, c, fa["LST"]], "LST").mean()),
+                    **({"tmax_7d": float((fast[-7:, a, c, fa["LST"]] * ds.barra_stats["tasmax"][1]
+                                          + ds.barra_stats["tasmax"][0]).mean())} if getattr(ds, "causal", False)
+                       else {"lst_7d": float(denorm(fast[-7:, a, c, fa["LST"]], "LST").mean())}),
                     wind_7d=float(denorm(fast[-7:, a, c, fa["WIND"]], "WIND").mean()),
                     biomass=float(slow[-1, a, c, len(SLOW_CHANNELS)] * ds.agb_std + ds.agb_mean),
                     **{f"sm_b{k:02d}": float(v) for k, v in enumerate(sm_traj)},
