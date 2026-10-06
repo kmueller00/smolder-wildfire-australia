@@ -19,7 +19,8 @@ from matplotlib.colors import LinearSegmentedColormap
 from style_smolder import ACCENT, ACCENT2, INK, MUTED, PANEL_BG, new_figure, style_axes
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-RES = os.path.join(HERE, "..", "results")
+RES = os.environ.get("EXPLAIN_DIR", os.path.join(HERE, "..", "results"))       # a run's explain_2020*
+FIG_OUT = os.environ.get("FIG_OUT", HERE)
 CLASSES = ["hit", "false_alarm", "miss", "background"]
 CLASS_LABEL = {"hit": "top 1 %, burned", "false_alarm": "top 1 %, no fire",
                "miss": "burned, not top 1 %", "background": "neither"}
@@ -104,7 +105,7 @@ def importance():
             s.set_visible(False)
         ax.tick_params(length=0)
     fig.suptitle("What decides the top-1 % risk area", fontsize=14, fontweight="bold", color=INK, y=1.02)
-    fig.savefig(os.path.join(HERE, "fig_explain_importance.png"), dpi=250, bbox_inches="tight", facecolor="white")
+    fig.savefig(os.path.join(FIG_OUT, "fig_explain_importance.png"), dpi=250, bbox_inches="tight", facecolor="white")
     print("wrote fig_explain_importance.png")
 
 
@@ -168,7 +169,7 @@ def conditions(pixels):
     fig.suptitle("Conditions on the issue day by forecast outcome", fontsize=14, fontweight="bold",
                  color=INK, y=1.0)
     fig.tight_layout(rect=(0, 0.06, 1, 1), h_pad=2.6)
-    fig.savefig(os.path.join(HERE, "fig_explain_conditions.png"), dpi=250, bbox_inches="tight", facecolor="white")
+    fig.savefig(os.path.join(FIG_OUT, "fig_explain_conditions.png"), dpi=250, bbox_inches="tight", facecolor="white")
     print("wrote fig_explain_conditions.png")
     return p
 
@@ -198,7 +199,7 @@ def _prefire_figure(S, title, out, bins_end_on_issue_day=False):
                 ax.legend(fontsize=8.8, loc="upper left", frameon=True, facecolor="white", edgecolor=MUTED)
     fig.suptitle(title, fontsize=14, fontweight="bold", color=INK, y=1.0)
     fig.tight_layout(rect=(0, 0.01, 1, 0.99))
-    fig.savefig(os.path.join(HERE, out), dpi=220, bbox_inches="tight", facecolor="white")
+    fig.savefig(os.path.join(FIG_OUT, out), dpi=220, bbox_inches="tight", facecolor="white")
     print("wrote", out)
 
 

@@ -26,8 +26,8 @@ from matplotlib.patches import FancyArrowPatch, Rectangle
 from style_smolder import ACCENT, ACCENT2, INK, MUTED
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-CACHE = os.path.join(HERE, "data", "architecture_patch.npz")
-OUT = os.path.join(HERE, "fig_smolder_architecture.png")
+CACHE = os.environ.get("ARCH_CACHE", os.path.join(HERE, "data", "architecture_patch.npz"))
+OUT = os.path.join(os.environ.get("FIG_OUT", HERE), "fig_smolder_architecture.png")
 PATCH, THUMB = 384, 128
 ISSUE_DAY = 319                      # 2020-11-15, index in the 2020 cube
 
@@ -58,7 +58,7 @@ def extract():
     sl = (slice(y0, y0 + PATCH), slice(x0, x0 + PATCH))
     land = lm[sl]
 
-    names = list(g.attrs["channels"])
+    names = list(g.attrs.get("channels") or g.attrs["dyn_vars"])   # archived cube | full cube
     fast_days = np.arange(D - 13, D + 1)
     X = np.asarray(g["X"][D - 13:D + 1, sl[0], sl[1], :], np.float32)
     out = dict(y0=y0, x0=x0, date=np.array(g.attrs["time"][D]),
@@ -105,7 +105,9 @@ def extract():
             zarr_paths=(daily_cube(2020),), stats_path="channel_stats_2015_2018.json",
             slow_cube_path="cube_slow_8day.zarr", day_offset=1826, patch_size=PATCH,
             samples_per_epoch=1, seed=0, deterministic=True, fire_history=True,
-            fire_history_lags=(3, 4, 5), fire_history_distance=True))
+            fire_history_lags=(3, 4, 5), fire_history_distance=True,
+        use_elevation=os.environ.get("USE_ELEVATION", "0") == "1",       # the other inputs are read
+        use_slope_aspect=os.environ.get("USE_SLOPE_ASPECT", "0") == "1"))  # from the environment
         b = ds.sample_at(D + 1, y0, x0)      # last step forecasts days D+1..D+3
         with torch.no_grad():
             p = torch.sigmoid(m.forward_seq(b["x_slow"][None], b["x_fast"][None], b["x_cat"][None]))[0].numpy()
@@ -116,6 +118,9 @@ def extract():
             pct.append(_block(r, "mean"))
         out["pred"] = np.stack(pct).astype(np.float16)
         out["has_pred"] = True
+        emb = int(sum(e.embedding_dim for e in (m.lc_emb, m.kg_emb)))          # land cover + climate zone
+        out["c_slow"] = int(b["x_slow"].shape[-1]) + emb                         # ConvLSTM input channels
+        out["c_fast"] = int(b["x_fast"].shape[-1]) + emb
     os.makedirs(os.path.dirname(CACHE), exist_ok=True)
     np.savez_compressed(CACHE, **out)
     print("wrote", CACHE, "patch", y0, x0, "prediction" if out["has_pred"] else "target only")
@@ -205,6 +210,8 @@ def draw():
     global LAND
     d = np.load(CACHE, allow_pickle=False)
     LAND = np.asarray(d["land"])
+    cs = int(d["c_slow"]) if "c_slow" in d else 17
+    cf = int(d["c_fast"]) if "c_fast" in d else 21
     fig, ax = plt.subplots(figsize=(12.6, 7.4))
     ax.set_xlim(0, 126)
     ax.set_ylim(7, 81)
@@ -220,9 +227,9 @@ def draw():
 
     # ---- inputs and (a) unrolled ConvLSTM chains
     xs = [27.0, 38.8, 50.6]
-    chains = ((62.0, ACCENT, "Slow-branch input", "(18, 384, 384, 17)", "18 steps of 8-day averages",
+    chains = ((62.0, ACCENT, "Slow-branch input", f"(18, 384, 384, {cs})", "18 steps of 8-day averages",
                "18 steps, 5 × 5 kernels, 64 channels"),
-              (30.0, ACCENT2, "Fast-branch input", "(14, 384, 384, 21)", "14 daily steps",
+              (30.0, ACCENT2, "Fast-branch input", f"(14, 384, 384, {cf})", "14 daily steps",
                "14 steps, 5 × 5 kernels, 64 channels"))
     for yc, col, name, shape, sub, steps in chains:
         box(ax, 1.0, yc - 17.0, 20.0, 13.0, col, [(name, 8.8, True, col), (shape, 8.6, False, INK),

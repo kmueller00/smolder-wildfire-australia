@@ -22,11 +22,12 @@ from style_smolder import (ACCENT, ACCENT2, GRID_COLOR, INK, MUTED, PANEL_BG, SP
                            new_figure, style_axes)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-RES = os.path.join(HERE, "..", "results")
+RES = os.environ.get("NATIONAL_DIR", os.path.join(HERE, "..", "results"))      # a run's national_2020*
+FIG_OUT = os.environ.get("FIG_OUT", HERE)
 S = json.load(open(os.path.join(RES, "national_2020.json")))
 D = pd.read_csv(os.path.join(RES, "national_2020_daily.csv"), parse_dates=["date"])
 M = np.load(os.path.join(RES, "national_2020_maps.npz"))
-_BP = os.path.join(RES, "national_2020_persistence.json")
+_BP = os.environ.get("PERSIST_JSON", os.path.join(HERE, "..", "results", "national_2020_persistence.json"))
 B = json.load(open(_BP)) if os.path.exists(_BP) else None     # evaluate_persistence.py
 BASELINE = "#8A8F98"
 LON0, LAT0, PX = 112.904998779, -9.005000113999998, 0.01
@@ -100,7 +101,7 @@ def example():
               loc="lower left", fontsize=9, frameon=True, facecolor="white", edgecolor=MUTED)
     ax.set_title(f"SMOLDER forecast issued {date}: fire risk for the next 3 days",
                  fontsize=13.5, fontweight="bold", color=INK, pad=10)
-    fig.savefig(os.path.join(HERE, "fig_national_example.png"), dpi=220, bbox_inches="tight", facecolor="white")
+    fig.savefig(os.path.join(FIG_OUT, "fig_national_example.png"), dpi=220, bbox_inches="tight", facecolor="white")
     print("wrote fig_national_example.png")
 
 
@@ -126,7 +127,7 @@ def maps():
         geo_axes(ax)
     fig.suptitle("Annual picture, 2020 hold-out year", fontsize=14, fontweight="bold", color=INK, y=1.0)
     fig.tight_layout()
-    fig.savefig(os.path.join(HERE, "fig_national_maps.png"), dpi=220, bbox_inches="tight", facecolor="white")
+    fig.savefig(os.path.join(FIG_OUT, "fig_national_maps.png"), dpi=220, bbox_inches="tight", facecolor="white")
     print("wrote fig_national_maps.png")
 
 
@@ -164,7 +165,7 @@ def skill():
 
     fig.suptitle("National skill, 2020 hold-out year", fontsize=14, fontweight="bold", color=INK, y=1.03)
     fig.tight_layout()
-    fig.savefig(os.path.join(HERE, "fig_national_skill.png"), dpi=250, bbox_inches="tight", facecolor="white")
+    fig.savefig(os.path.join(FIG_OUT, "fig_national_skill.png"), dpi=250, bbox_inches="tight", facecolor="white")
     print("wrote fig_national_skill.png")
 
 

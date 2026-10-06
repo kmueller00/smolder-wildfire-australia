@@ -31,11 +31,13 @@ from matplotlib.patches import Patch
 from style_smolder import INK, PANEL_BG
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-CACHE = os.path.join(HERE, "data", "event_maps_2019.npz")
-OUTS = {"well": os.path.join(HERE, "fig_events_well_2019.png"),
-        "poorly": os.path.join(HERE, "fig_events_poorly_2019.png")}
+YEAR = int(os.environ.get("YEAR", 2019))
+CACHE = os.environ.get("EVENT_CACHE", os.path.join(HERE, "data", f"event_maps_{YEAR}.npz"))
+FIG_OUT = os.environ.get("FIG_OUT", HERE)
+OUTS = {"well": os.path.join(FIG_OUT, f"fig_events_well_{YEAR}.png"),
+        "poorly": os.path.join(FIG_OUT, f"fig_events_poorly_{YEAR}.png")}
 LON0, LAT0, PX = 112.904998779, -9.005000113999998, 0.01
-BUDGET = 0.0013
+BUDGET = float(os.environ.get("BUDGET", 0.0013))
 BLOCK, WIN = 64, 3                        # windows of 3 x 3 blocks = 192 px, stride 64 px
 MIN_FIRE = 400
 N_EV = 4
@@ -43,7 +45,7 @@ SEP_DAYS, SEP_PX = 30, 300
 RANKINGS = ["persistence", "full"]
 TITLES = {"persistence": "Persistence", "full": "SMOLDER"}
 SCORE_DIR = "/home/saturn/gwgi/gwgi107h/wildfire_data/firecastnet/experiments_scores"
-SCORES = {"full": f"{SCORE_DIR}/full_model_seed123_2019.npy"}
+SCORES = {"full": os.environ.get("EVENT_SCORES", f"{SCORE_DIR}/full_model_seed123_{YEAR}.npy")}
 
 OCEAN = "#FFFFFF"
 LAND = "#ECECEE"
@@ -57,7 +59,7 @@ G = {}
 # ------------------------------------------------------------------ compute
 def _init():
     from smolder.data.io import daily_cube, open_zarr_root
-    g = open_zarr_root(daily_cube(2019))
+    g = open_zarr_root(daily_cube(YEAR))
     G["y"] = g["y_fire_3d"]
     G["land"] = np.asarray(g["landmask"][...]) > 0
     G["scores"] = {n: np.load(p, mmap_mode="r") for n, p in SCORES.items()}
@@ -116,7 +118,7 @@ def compute():
     sys.path.insert(0, os.path.dirname(HERE))
     from smolder.data.io import daily_cube, open_zarr_root
     days = np.load(SCORES["full"] + ".days.npy")
-    times = list(open_zarr_root(daily_cube(2019)).attrs["time"])
+    times = list(open_zarr_root(daily_cube(YEAR)).attrs["time"])
     with Pool(int(os.environ.get("WORKERS", 24)), initializer=_init) as pool:
         res = list(pool.imap(_day, [(int(D), i) for i, D in enumerate(days)], chunksize=2))
     cand = []                                  # (kind, sort key, D, row, wy, wx, stats)
@@ -230,8 +232,8 @@ def event_table():
     (results/experiments/smolder/adaptive_budget_2019.json); written next to
     that file as event_maps_2019.json."""
     import json
-    res = os.path.join(HERE, "..", "results", "experiments", "smolder")
-    thr = json.load(open(os.path.join(res, "adaptive_budget_2019.json")))["adaptive"]["SMOLDER"][str(BUDGET)]["threshold"]
+    res = os.environ.get("EVENT_RES", os.path.join(HERE, "..", "results", "experiments", "smolder"))
+    thr = json.load(open(os.path.join(res, f"adaptive_budget_{YEAR}.json")))["adaptive"]["SMOLDER"][str(BUDGET)]["threshold"]
     z = np.load(CACHE)
     out = dict(budget=BUDGET, adaptive_logit_threshold=thr, events={})
     for kind in OUTS:
@@ -245,7 +247,7 @@ def event_table():
             out["events"][f"{kind} {i + 1}"] = dict(date=str(z[p + "date"]), fire_px=int(y.sum()), **{
                 n_: dict(caught=float((f & y).sum() / max(y.sum(), 1)), false_alarms=int((f & ~y).sum()))
                 for n_, f in flags.items()})
-    path = os.path.join(res, "event_maps_2019.json")
+    path = os.path.join(res, f"event_maps_{YEAR}.json")
     json.dump(out, open(path, "w"), indent=1)
     print("wrote", path)
 

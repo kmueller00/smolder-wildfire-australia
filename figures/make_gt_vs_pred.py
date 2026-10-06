@@ -24,8 +24,8 @@ from matplotlib.ticker import FuncFormatter, MultipleLocator
 from style_smolder import GRID_COLOR, INK, MUTED, PANEL_BG, SPINE_COLOR
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-CACHE = os.path.join(HERE, "data", "gt_vs_pred_2020.npz")
-OUT = os.path.join(HERE, "fig_gt_vs_pred_2020.png")
+CACHE = os.environ.get("GT_CACHE", os.path.join(HERE, "data", "gt_vs_pred_2020.npz"))
+OUT = os.path.join(os.environ.get("FIG_OUT", HERE), "fig_gt_vs_pred_2020.png")
 LON0, LAT0, PX = 112.904998779, -9.005000113999998, 0.01
 PATCH = 384
 N_EX = 4
@@ -53,6 +53,8 @@ def compute():
     ckpt = os.environ.get("CKPT", os.path.join(os.path.dirname(HERE), "checkpoints", "smolder_swa.ckpt"))
     cube = daily_cube(2020)
     times = list(open_zarr_root(cube).attrs.get("time", []))
+    from smolder.data.zarr_dual_datamodule import check_checkpoint_inputs
+    check_checkpoint_inputs(ckpt)                     # inputs set in the environment must match the model
     m = ConvLSTMLitDual.load_from_checkpoint(ckpt, map_location="cpu")
     m.eval()
     ds = DualWindowDataset(DualPatchConfig(
@@ -60,7 +62,9 @@ def compute():
         slow_cube_path="cube_slow_8day.zarr", day_offset=1826,
         patch_size=PATCH, samples_per_epoch=300, seed=21,
         min_pos_pixels=45, pos_frac=1.0, deterministic=True,
-        fire_history=True, fire_history_lags=(3, 4, 5), fire_history_distance=True))
+        fire_history=True, fire_history_lags=(3, 4, 5), fire_history_distance=True,
+        use_elevation=os.environ.get("USE_ELEVATION", "0") == "1",       # the other inputs are read
+        use_slope_aspect=os.environ.get("USE_SLOPE_ASPECT", "0") == "1"))  # from the environment
 
     picks, seen = [], set()
     for i in range(300):
@@ -161,7 +165,7 @@ def _locator(ax, nat, y0, x0, yy, xx):
 
 def plot():
     d = np.load(CACHE)
-    nat = np.load(os.path.join(HERE, "..", "results", "national_2020_maps.npz"))
+    nat = np.load(os.path.join(os.environ.get("NATIONAL_DIR", os.path.join(HERE, "..", "results")), "national_2020_maps.npz"))
     n = int(d["n"])
     nrow = (n + 1) // 2                     # two forecasts per row, each as observed | predicted
     fig = plt.figure(figsize=(19.6, 4.75 * nrow + 1.3), facecolor="white")

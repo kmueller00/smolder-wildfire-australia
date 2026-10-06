@@ -21,5 +21,13 @@
   "network": 1185281,
   "embeddings": 2560,
   "trainable": 1187841
+ },
+ "final candidate B (job 1831824, swa.ckpt)": {
+  "checkpoint": "/home/saturn/gwgi/gwgi107h/wildfire_data/checkpoints/experiments/smolder/full_model_windalign_seed123/job_1831824/swa.ckpt",
+  "input_dim_slow": 11,
+  "input_dim_fast": 23,
+  "network": 1185281,
+  "embeddings": 2560,
+  "trainable": 1187841
  }
 }

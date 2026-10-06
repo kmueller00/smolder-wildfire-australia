@@ -11,7 +11,7 @@ import pandas as pd
 from style_smolder import ACCENT, ACCENT2, INK, MUTED, new_figure, style_axes
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-C = pd.read_csv(os.path.join(HERE, "..", "results", "training_curve.csv"))
+C = pd.read_csv(os.environ.get("CURVE", os.path.join(HERE, "..", "results", "training_curve.csv")))
 
 fig = new_figure((13.0, 5.2))
 axA = fig.add_subplot(121)
@@ -45,5 +45,5 @@ for ax in (axA, axB):
 
 fig.suptitle("SMOLDER training convergence", fontsize=13.5, fontweight="bold", color=INK, y=1.02)
 fig.tight_layout()
-fig.savefig(os.path.join(HERE, "fig_convergence.png"), dpi=300, bbox_inches="tight", facecolor="white")
+fig.savefig(os.path.join(os.environ.get("FIG_OUT", HERE), "fig_convergence.png"), dpi=300, bbox_inches="tight", facecolor="white")
 print("wrote fig_convergence.png")
