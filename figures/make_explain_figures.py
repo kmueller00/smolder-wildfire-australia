@@ -166,77 +166,56 @@ def _wquantile(v, w, q):
 
 
 def conditions(pixels):
-    """(a) Distance to recent fire by forecast outcome, as stacked shares.
-    (b-e) Issue-day conditions per outcome and climate zone: median (dot) and
-    middle half (bar) of the pixels, weighted to the true class sizes."""
+    """Where each forecast outcome lies relative to fire already burning: one
+    stacked bar per outcome, shares of pixels by distance to the nearest fire
+    of the issue day and the two days before, weighted to the true class sizes.
+    The issue-day conditions per outcome and climate zone (weighted quartiles)
+    are computed for the numbers file but not drawn."""
     import pandas as pd
     _paper_rc()
     p = pd.read_csv(pixels, usecols=lambda c: c in {"cls", "cls_n", "patch", "climate", "dist_recent_fire_km"}
                     | {v for v, *_ in COND_VARS})
     p["w"] = _weights(p)
     d = p.dist_recent_fire_km.fillna(np.inf).values           # NaN: beyond the feature's range (~70 km)
-    fig = plt.figure(figsize=(PW, 3.5))
 
-    # (a) where each outcome lies relative to fire already burning
-    a = fig.add_axes([0.16, 0.70, 0.60, 0.26])
-    yy = np.arange(len(OUTCOMES))[::-1]
+    quartiles = {}                                             # var -> climate -> outcome -> [q25, median, q75, n]
+    for var, *_ in COND_VARS:
+        for clim in ("tropical", "arid", "temperate"):
+            for cls, *_ in OUTCOMES:
+                m = ((p.cls == cls) & (p.climate == clim)).values & np.isfinite(p[var].values)
+                if m.sum() >= 30:
+                    q = _wquantile(p[var].values[m], p.w.values[m], [0.25, 0.5, 0.75])
+                    quartiles.setdefault(var, {}).setdefault(clim, {})[cls] = [float(v) for v in q] + [int(m.sum())]
+
+    rows = [("hit", "Fire that SMOLDER caught"), ("miss", "Fire that SMOLDER missed"),
+            ("false_alarm", "False alarms"), ("background", "All other land")]
+    bands = [("under 3 km", 0, 3, "#A5482F", "white"), ("3 to 10 km", 3, 10, "#D9976A", INK),
+             ("over 10 km", 10, np.inf, "#EEE4D8", INK)]
+    fig = plt.figure(figsize=(PW, 1.9))
+    a = fig.add_axes([0.2, 0.2, 0.77, 0.58])
+    yy = np.arange(len(rows))[::-1]
     shares = {}
-    for (cls, name, desc, col), y in zip(OUTCOMES, yy):
+    for (cls, label), y in zip(rows, yy):
         m = (p.cls == cls).values
         w = p.w.values[m]; left = 0.0
         shares[cls] = []
-        for lab, lo, hi, bc in DIST_BANDS:
+        for _, lo, hi, col, tc in bands:
             sh = 100 * w[(d[m] >= lo) & ((d[m] < hi) | np.isinf(hi))].sum() / w.sum()
             shares[cls].append(sh)
-            a.barh(y, sh, left=left, height=0.66, color=bc, edgecolor="white", lw=0.4, zorder=3)
-            if sh >= 7:
-                a.text(left + sh / 2, y, f"{sh:.0f} %", ha="center", va="center", fontsize=6,
-                       color="white" if bc != "#D3D3D8" else INK, zorder=4)
+            a.barh(y, sh, left=left, height=0.68, color=col, edgecolor="white", lw=0.6, zorder=3)
+            if sh >= 6:
+                a.text(left + sh / 2, y, f"{sh:.0f} %", ha="center", va="center", fontsize=6.5, color=tc, zorder=4)
             left += sh
     a.set_yticks(yy)
-    a.set_yticklabels([f"{name}\n({desc})" for _, name, desc, _ in OUTCOMES], fontsize=6, linespacing=0.95)
-    for t, (_, _, _, col) in zip(a.get_yticklabels(), OUTCOMES):
-        t.set_color(col); t.set_fontweight("bold")
-    a.set_xlim(0, 100); a.set_xlabel("Share of pixels (%)", labelpad=1)
+    a.set_yticklabels([label for _, label in rows], fontsize=6.5)
+    a.set_xlim(0, 100); a.set_ylim(-0.5, len(rows) - 0.5)
+    a.set_xticks([0, 25, 50, 75, 100]); a.set_xticklabels(["0", "25", "50", "75", "100 %"])
     _paper_axes(a, grid_y=False)
-    a.legend(handles=[plt.Rectangle((0, 0), 1, 1, color=bc) for *_, bc in DIST_BANDS],
-             labels=[lab for lab, *_ in DIST_BANDS], title="Distance to fire of the\nissue day and 2 days before",
-             title_fontsize=6.2, loc="center left", bbox_to_anchor=(1.01, 0.5), frameon=False, handlelength=1.2)
-    _tag(a, "a", x=-0.25)
-
-    # (b-e) conditions on the issue day
-    x0, wd, gap = 0.085, 0.2, 0.03
-    ydot = {"tropical": 2, "arid": 1, "temperate": 0}
-    off = (np.arange(len(OUTCOMES)) - 1.5) * 0.17
-    quartiles = {}                                         # var -> climate -> outcome -> [q25, median, q75, n]
-    for k, (var, label, scale, fmt) in enumerate(COND_VARS):
-        ax = fig.add_axes([x0 + k * (wd + gap), 0.11, wd, 0.40])
-        for clim, yc in ydot.items():
-            for o, (cls, name, _, col) in enumerate(OUTCOMES):
-                m = ((p.cls == cls) & (p.climate == clim)).values & np.isfinite(p[var].values)
-                if m.sum() < 30:
-                    continue
-                q1, q2, q3 = _wquantile(p[var].values[m] * scale, p.w.values[m], [0.25, 0.5, 0.75])
-                quartiles.setdefault(var, {}).setdefault(clim, {})[cls] = [float(q1), float(q2), float(q3), int(m.sum())]
-                yv = yc - off[o]
-                ax.plot([q1, q3], [yv, yv], color=col, lw=1.6, alpha=0.45, solid_capstyle="butt", zorder=3)
-                ax.plot(q2, yv, "o", ms=3.2, color=col, zorder=4)
-        ax.set_ylim(-0.5, 2.5)
-        ax.set_yticks(list(ydot.values()))
-        ax.set_yticklabels([c if k == 0 else "" for c in ydot], fontsize=6.5)
-        if k > 0:
-            ax.tick_params(axis="y", length=0)
-        ax.set_xlabel(label, labelpad=1)
-        ax.set_xlim(left=0)
-        _paper_axes(ax, grid_y=False)
-        for yb in (0.5, 1.5):
-            ax.axhline(yb, color="white", lw=1.0, zorder=1)
-        _tag(ax, "bcde"[k], x=-0.33 if k == 0 else -0.06)
-    from matplotlib.lines import Line2D
-    fig.legend(handles=[Line2D([], [], color=col, marker="o", ms=3.2, lw=1.6, alpha=1) for *_, col in OUTCOMES],
-               labels=[name for _, name, _, _ in OUTCOMES], loc="lower left", bbox_to_anchor=(0.075, 0.535),
-               ncol=4, frameon=False, handlelength=1.6, columnspacing=1.4,
-               title="Conditions on the issue day (dot: median; bar: middle half of the pixels)",
+    a.tick_params(axis="y", length=0)
+    fig.legend(handles=[plt.Rectangle((0, 0), 1, 1, color=c) for _, _, _, c, _ in bands],
+               labels=[lab for lab, *_ in bands], loc="upper left", bbox_to_anchor=(0.2, 0.995), ncol=3,
+               frameon=False, handlelength=1.2, columnspacing=1.6,
+               title="Distance to the nearest fire detected on the issue day or the two days before",
                title_fontsize=6.5, alignment="left")
     fig.savefig(os.path.join(FIG_OUT, "fig_explain_conditions.png"), dpi=PDPI, facecolor="white")
     plt.close(fig)

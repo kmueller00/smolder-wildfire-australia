@@ -40,13 +40,12 @@ removes differences of region and season. Slow inputs are 8-day periods drawn
 at their centre; leaf area index is drawn at the date it was observed, 31 days
 before the model receives it.
 
-**fig_explain_conditions.png.** Forecast outcomes in 2020 with the threshold
-chosen on 2019 (best F2): caught (flagged, burned), missed (burned, not
-flagged), false alarm (flagged, no fire) and other land (neither). (a) Share of
-each outcome by distance to the nearest fire detected on the issue day or the
-two days before. (b to e) Conditions on the issue day by outcome and climate
-zone: median (dot) and middle half (bar) of the pixels. Pixels are weighted to
-the true size of their outcome in each patch.
+**fig_explain_conditions.png.** Where the forecast outcomes of 2020 lie
+relative to fire already burning, with the threshold chosen on 2019 (best
+F2): share of the fire that SMOLDER caught, of the fire it missed, of its
+false alarms and of all other land, by distance to the nearest fire detected
+on the issue day or the two days before. Pixels are weighted to the true size
+of their outcome in each patch.
 
 ## Input data, 2015 to 2020
 

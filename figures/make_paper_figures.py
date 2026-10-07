@@ -190,7 +190,9 @@ def importance():
 
 def events():
     year = int(os.environ.get("YEAR", 2020)); z = np.load(os.environ["EVENT_CACHE"])
-    OCEAN, LAND, RECENT, HIT, MISS, FALSE = "#FFFFFF", "#ECECEE", "#505055", "#2166AC", "#B2182B", "#9EC3E0"
+    # muted but distinct: recent fire amber, later fire brick red, flagged blue tones; coastline grey
+    OCEAN, LAND, RECENT, HIT, MISS, FALSE = "#FFFFFF", "#E9E9EC", "#D69A3C", "#2F6DA8", "#B8473F", "#A9C8E6"
+    COAST = "#7A7A80"
     cmap = ListedColormap([OCEAN, LAND, RECENT, HIT, MISS, FALSE]); S = 192
     LON0, LAT0, PX = 112.904998779, -9.005000113999998, 0.01
 
@@ -215,6 +217,7 @@ def events():
                 ax = fig.add_axes([x_ev[col] + j * (pw + gap), yb, pw, pw * W / 3.4])
                 flag = None if c == "obs" else z[p + c]
                 ax.imshow(rgb(land, recent, y, flag), cmap=cmap, vmin=-0.5, vmax=5.5, interpolation="nearest")
+                ax.contour(land.astype(float), levels=[0.5], colors=COAST, linewidths=0.5)
                 ax.set_xticks([]); ax.set_yticks([])
                 for s in ax.spines.values():
                     s.set_color("#9A9AA0"); s.set_linewidth(0.5)
@@ -229,8 +232,9 @@ def events():
                                  color=INK, loc="left", pad=2)
         handles = [Patch(color=RECENT, label="fire on days D-2 to D"), Patch(color=HIT, label="flagged, burned"),
                    Patch(color=MISS, label="burned, not flagged (left: all fire D+1 to D+3)"),
-                   Patch(color=FALSE, label="flagged, no fire")]
-        fig.legend(handles=handles, loc="lower center", ncol=4, frameon=False, fontsize=6, bbox_to_anchor=(0.5, 0.0),
+                   Patch(color=FALSE, label="flagged, no fire"),
+                   matplotlib.lines.Line2D([], [], color=COAST, lw=0.8, label="coastline")]
+        fig.legend(handles=handles, loc="lower center", ncol=5, frameon=False, fontsize=6, bbox_to_anchor=(0.5, 0.0),
                    handlelength=1.2, columnspacing=1.0)
         save(fig, f"fig_events_{kind}_{year}.png", 3.4)
 

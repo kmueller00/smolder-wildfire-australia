@@ -349,11 +349,10 @@ existing fire goes next.
 
 ![conditions by forecast outcome](figures/fig_explain_conditions.png)
 
-*(a) Where the outcomes lie: 87.0 % of the caught fire pixels and 78.2 % of
-the false alarms are within 3 km of recent fire, while 59.6 % of the missed
-fire is more than 10 km away. (b to e) Conditions on the issue day by
-outcome and climate zone (median and middle half).* Within a climate zone,
-caught pixels are drier than other land: in the temperate zone soil moisture
+*Where the outcomes lie: 87.0 % of the caught fire pixels and 78.2 % of the
+false alarms are within 3 km of recent fire, while 59.6 % of the missed fire
+is more than 10 km away.* Within a climate zone, caught pixels are also drier
+than other land: in the temperate zone soil moisture
 0.337 against 0.549 and vapour pressure deficit 2.31 against 1.42 kPa
 (`explain_figures_numbers.json`).
 
