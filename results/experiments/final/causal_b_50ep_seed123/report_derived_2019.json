@@ -1,0 +1,65 @@
+{
+ "year": 2019,
+ "run_dir": "results/experiments/final/causal_b_50ep_seed123",
+ "sources": {
+  "adaptive": "adaptive_budget_2019.json: adaptive_best",
+  "bands": "operating_point_2019.json: bands.fire_share",
+  "national": "national_2019.json",
+  "persistence": "national_2019_persistence.json"
+ },
+ "fire_share_by_band": {
+  "0-3 km": 0.46284220654658664,
+  "3-10 km": 0.21139661945590155,
+  "> 10 km": 0.32576117399751175
+ },
+ "caught_by_band": {
+  "SMOLDER.f1": {
+   "recall": 0.2919978672419393,
+   "recall_from_bands": 0.2919978672419393,
+   "share_of_caught": {
+    "0-3 km": 0.9597623045440236,
+    "3-10 km": 0.03836446636583063,
+    "> 10 km": 0.0018732290901458705
+   }
+  },
+  "SMOLDER.f2": {
+   "recall": 0.3984779584357323,
+   "recall_from_bands": 0.39847795843573225,
+   "share_of_caught": {
+    "0-3 km": 0.9117242201348061,
+    "3-10 km": 0.08318690234046071,
+    "> 10 km": 0.005088877524733059
+   }
+  },
+  "persistence.f1": {
+   "recall": 0.2803289840594721,
+   "recall_from_bands": 0.28032898405947204,
+   "share_of_caught": {
+    "0-3 km": 1.0,
+    "3-10 km": 0.0,
+    "> 10 km": 0.0
+   }
+  },
+  "persistence.f2": {
+   "recall": 0.3330795065239108,
+   "recall_from_bands": 0.3330795065239108,
+   "share_of_caught": {
+    "0-3 km": 1.0,
+    "3-10 km": 0.0,
+    "> 10 km": 0.0
+   }
+  }
+ },
+ "ratios": {
+  "pooled_auc_pr": 3.4334888400523473,
+  "precision_f2": 2.058314241597751
+ },
+ "common_days": {
+  "n_days": 349,
+  "n_days_final": 349,
+  "n_days_model_B": 352,
+  "daily_auc_pr_mean_final": 0.180765259377772,
+  "daily_auc_pr_mean_model_B": 0.17985073342806243,
+  "share_days_final_higher": 0.5300859598853869
+ }
+}

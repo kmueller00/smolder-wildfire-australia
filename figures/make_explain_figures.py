@@ -204,6 +204,7 @@ def conditions(pixels):
     x0, wd, gap = 0.085, 0.2, 0.03
     ydot = {"tropical": 2, "arid": 1, "temperate": 0}
     off = (np.arange(len(OUTCOMES)) - 1.5) * 0.17
+    quartiles = {}                                         # var -> climate -> outcome -> [q25, median, q75, n]
     for k, (var, label, scale, fmt) in enumerate(COND_VARS):
         ax = fig.add_axes([x0 + k * (wd + gap), 0.11, wd, 0.40])
         for clim, yc in ydot.items():
@@ -212,6 +213,7 @@ def conditions(pixels):
                 if m.sum() < 30:
                     continue
                 q1, q2, q3 = _wquantile(p[var].values[m] * scale, p.w.values[m], [0.25, 0.5, 0.75])
+                quartiles.setdefault(var, {}).setdefault(clim, {})[cls] = [float(q1), float(q2), float(q3), int(m.sum())]
                 yv = yc - off[o]
                 ax.plot([q1, q3], [yv, yv], color=col, lw=1.6, alpha=0.45, solid_capstyle="butt", zorder=3)
                 ax.plot(q2, yv, "o", ms=3.2, color=col, zorder=4)
@@ -236,7 +238,7 @@ def conditions(pixels):
     plt.close(fig)
     print("wrote fig_explain_conditions.png; distance shares (%):",
           {c: [round(v, 1) for v in s_] for c, s_ in shares.items()})
-    return shares
+    return shares, quartiles
 
 
 TRAJ_PAPER = [("sm", 18, "Soil moisture index", "slow"), ("ppt", 18, "Rain per 8 days (mm)", "slow"),
@@ -350,11 +352,12 @@ if __name__ == "__main__":
         importance()
         if "--pixels" in sys.argv:
             px = sys.argv[sys.argv.index("--pixels") + 1]
-            shares = conditions(px)
+            shares, quartiles = conditions(px)
             traj = prefire(px)
             with open(os.path.join(FIG_OUT, "explain_figures_numbers.json"), "w") as fh:
                 json.dump(dict(pixels=os.path.abspath(px), distance_shares_pct=shares,
-                               distance_bands=[b[0] for b in DIST_BANDS], prefire=traj), fh, indent=1)
+                               distance_bands=[b[0] for b in DIST_BANDS],
+                               conditions_weighted_q25_median_q75_n=quartiles, prefire=traj), fh, indent=1)
         else:
             print("skipped fig_explain_conditions.png and fig_explain_prefire.png (need --pixels PIXELS.csv.gz)")
         prefire_newfire()
