@@ -335,7 +335,7 @@ final model.
 
 | Zenodo record | content |
 |---|---|
-| [10.5281/zenodo.21749289](https://doi.org/10.5281/zenodo.21749289) (all versions; version 2 holds the inputs of the final model) | every input the final model reads for 2020, CC BY-SA 4.0 |
+| [10.5281/zenodo.23158319](https://doi.org/10.5281/zenodo.23158319) (version 2.0; all versions: [10.5281/zenodo.21749289](https://doi.org/10.5281/zenodo.21749289)) | every input the final model reads for 2020, 24.1 GB, CC BY-SA 4.0 |
 
 | archive (version 2) | content | size |
 |---|---|---|
