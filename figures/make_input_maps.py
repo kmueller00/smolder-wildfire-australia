@@ -45,6 +45,7 @@ CACHE = os.environ.get("MAPS_CACHE", os.path.join(HERE, "data", "input_maps.npz"
 LON0, LAT0, PX = 112.904998779, -9.005000113999998, 0.01
 H, W = 3474, 4110
 OCEAN = "#BEDDF2"
+LAND_UNDER = "#A9A9AF"                            # land beneath sparse fields
 N_DAYS = 2192                                              # 2015-01-01 .. 2020-12-31
 D = 2                                                      # display every 2nd pixel
 LC_GROUPS = [("closed forest", (111, 112, 113, 114, 115, 116), "#1B5E20"),
@@ -150,12 +151,22 @@ def _extent(lat, lon):
     return (lon[0], lon[-1], lat[-1], lat[0]) if lat[0] > lat[-1] else (lon[0], lon[-1], lat[0], lat[-1])
 
 
-def draw(name, field, lat, lon, title, label, cmap, vmin=None, vmax=None, norm=None, legend=None):
+def _underlay(ax, under, lat, lon, origin):
+    """Land in light grey beneath a sparse field, so the continent stays visible."""
+    if under is not None:
+        ax.imshow(np.where(under, 1.0, np.nan), extent=_extent(lat, lon), origin=origin,
+                  cmap=ListedColormap([LAND_UNDER]), interpolation="nearest")
+
+
+def draw(name, field, lat, lon, title, label, cmap, vmin=None, vmax=None, norm=None, legend=None, under=None):
+    """under: optional land mask drawn in light grey beneath the field (for
+    sparse fields such as fire detections)."""
     origin = "upper" if lat[0] > lat[-1] else "lower"
     kw = dict(extent=_extent(lat, lon), origin=origin, cmap=cmap, interpolation="nearest")
     kw.update(dict(norm=norm) if norm is not None else dict(vmin=vmin, vmax=vmax))
     # full map
     fig, ax = plt.subplots(figsize=(10.5, 6.2)); fig.patch.set_facecolor("white")
+    _underlay(ax, under, lat, lon, origin)
     im = ax.imshow(np.ma.masked_invalid(field), **kw)
     _decor(ax, True)
     ax.set_xticklabels([f"{v}°E" for v in range(115, 155, 5)])
@@ -171,6 +182,7 @@ def draw(name, field, lat, lon, title, label, cmap, vmin=None, vmax=None, norm=N
     plt.close(fig)
     # card
     fig = plt.figure(figsize=(11.24, 9.50), dpi=100); ax = fig.add_axes([0, 0, 1, 1])
+    _underlay(ax, under, lat, lon, origin)
     ax.imshow(np.ma.masked_invalid(field), **kw); _decor(ax, False); ax.set_aspect("auto")
     ax.tick_params(length=0, labelbottom=False, labelleft=False)
     buf = io.BytesIO(); fig.savefig(buf, dpi=100); plt.close(fig); buf.seek(0)
@@ -206,7 +218,8 @@ def main():
                             "AGB (Mg ha⁻¹)", "YlGn", vmin=0, vmax=np.nanpercentile(agb, 99))
     fd = m(z["fire"].astype(float)); fd[fd == 0] = np.nan
     draw("fire_days", fd, lat[:fd.shape[0]], lon[:fd.shape[1]], "Days with a VIIRS fire detection 2015–2020",
-         "days (max over 2 x 2 km)", "inferno_r", vmin=1, vmax=np.nanpercentile(fd, 99))
+         "days (max over 2 x 2 km)", "inferno_r", vmin=1, vmax=np.nanpercentile(fd, 99),
+         under=land[:fd.shape[0], :fd.shape[1]])
     sm, ppt = z["slow"]
     draw("sm_mean", m(sm), lat, lon, "Mean soil moisture index 2015–2020 (SMIPS)", "soil moisture index (0 to 1)",
          "YlGnBu", vmin=0, vmax=np.nanpercentile(m(sm), 99))

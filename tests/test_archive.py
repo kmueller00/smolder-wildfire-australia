@@ -41,6 +41,11 @@ def build(data_dir, cube, fast):
         fast_stores=fast, **FULL))
 
 
+def at(ds, data_dir, t, y0, x0):
+    os.environ["SMOLDER_DATA"] = data_dir
+    return ds.sample_at(int(t), y0, x0)
+
+
 def main():
     full_dir, arch_dir = os.environ["SMOLDER_DATA"], os.environ["ARCHIVE_DIR"]
     os.chdir(arch_dir)                                    # nothing else resolvable from the cwd
@@ -67,7 +72,10 @@ def main():
             y0, x0 = int(rng.integers(0, ref.H - PATCH)), int(rng.integers(0, ref.W - PATCH))
             if ref._patch_ok(y0, x0):
                 break
-        a, b, o = ref.sample_at(int(t), y0, x0), arc.sample_at(int(t), y0, x0), orig.sample_at(int(t), y0, x0)
+        # each dataset resolves its stores in its own data folder: the full-data ones open
+        # further daily cubes lazily (causal NDVI of early January reads the year before)
+        a, o = at(ref, full_dir, t, y0, x0), at(orig, full_dir, t, y0, x0)
+        b = at(arc, arch_dir, t, y0, x0)
         assert set(a) == set(b) == set(o), (t, set(a) ^ set(b))
         for k in a:
             assert torch.equal(a[k], b[k]), (int(t), y0, x0, k)

@@ -9,6 +9,10 @@ Patch selection is deterministic (evaluation seed, fire-active patches, one per
 calendar month, the four with the most fire). Each row is one forecast: the
 right panel is the risk map issued on the stated date, the left panel the fire
 observed over the following three days (the model's target).
+
+Flagged area: with THRESHOLDS_FROM=<adaptive_budget_2019.json> every pixel above
+SMOLDER's best-F2 score threshold of 2019 (the national adaptive rule), so its
+size varies between forecasts; without it the top 1 % of the patch.
 """
 import os
 import sys
@@ -36,8 +40,17 @@ OCEAN = "#C9D6E3"
 HATCH = "#3A3A3A"
 plt.rcParams["hatch.color"] = HATCH
 plt.rcParams["hatch.linewidth"] = 1.1
-FIRE_MISS = "#C400FF"    # observed fire outside the top-1% area
-FIRE_HIT = "#00E83A"     # observed fire inside the top-1% area
+FIRE_MISS = "#C400FF"    # observed fire outside the flagged area
+FIRE_HIT = "#00E83A"     # observed fire inside the flagged area
+THRESHOLDS_FROM = os.environ.get("THRESHOLDS_FROM")
+if THRESHOLDS_FROM:
+    import json
+    _thr = json.load(open(THRESHOLDS_FROM))["adaptive_best"]["SMOLDER"][os.environ.get("THRESHOLD_CRIT", "f2")]["threshold"]
+    P_THR = 1.0 / (1.0 + np.exp(-_thr))
+    AREA = "flagged area"
+    AREA_LEGEND = "Flagged area (score above the threshold chosen on 2019)"
+else:
+    P_THR, AREA, AREA_LEGEND = None, "top-1% area", "Top-1% risk area"
 RISK = LinearSegmentedColormap.from_list(
     "risk", [PANEL_BG, "#FFE9A8", "#FFAB3D", "#E8452C", "#8B0000"])
 
@@ -180,9 +193,12 @@ def plot():
         date = f"{int(iso[8:10])} {MONTHS[int(iso[5:7]) - 1]} {iso[:4]}"
         ext = [LON0 + x0 * PX, LON0 + (x0 + PATCH) * PX, LAT0 - (y0 + PATCH) * PX, LAT0 - y0 * PX]
 
-        v = prob[land]
-        k = max(1, int(0.01 * v.size))
-        top1 = land & (prob >= np.partition(v, -k)[-k])
+        if P_THR is not None:
+            top1 = land & (prob >= P_THR)
+        else:
+            v = prob[land]
+            k = max(1, int(0.01 * v.size))
+            top1 = land & (prob >= np.partition(v, -k)[-k])
         caught = int((truth & top1).sum())
         nfire = int(truth.sum())
         yy, xx = np.where(truth)
@@ -218,7 +234,7 @@ def plot():
         ax.scatter(fx[hit], fy[hit], s=1.6, c=FIRE_HIT, marker="s", linewidths=0, zorder=4)
         ax.set_title(f"SMOLDER risk, issued {date}", fontsize=10.5, fontweight="bold",
                      color=INK, pad=6)
-        ax.text(0.025, 0.04, f"{caught}/{nfire} in top-1% area ({100 * caught / max(nfire, 1):.0f}%)",
+        ax.text(0.025, 0.04, f"{caught}/{nfire} in {AREA} ({100 * caught / max(nfire, 1):.0f}%)",
                 transform=ax.transAxes, fontsize=8.5, fontweight="bold", color=INK, zorder=5,
                 bbox=dict(fc="white", ec=MUTED, lw=0.6, alpha=0.92, pad=2.2))
 
@@ -234,9 +250,9 @@ def plot():
     cb.set_label("Predicted risk, percentile within the patch", fontsize=9, color=INK)
     cb.ax.tick_params(labelsize=8, colors=INK)
     cb.outline.set_edgecolor(SPINE_COLOR)
-    handles = [Patch(facecolor=FIRE_HIT, label="Observed fire inside the top-1% area"),
+    handles = [Patch(facecolor=FIRE_HIT, label=f"Observed fire inside the {AREA}"),
                Patch(facecolor=FIRE_MISS, label="Observed fire outside it"),
-               Patch(facecolor="none", edgecolor=HATCH, hatch="////", label="Top-1% risk area"),
+               Patch(facecolor="none", edgecolor=HATCH, hatch="////", label=AREA_LEGEND),
                Patch(facecolor=OCEAN, label="Ocean"),
                Patch(facecolor="none", edgecolor=LOCATOR, lw=1.3, label="Location of the patch (inset)")]
     fig.legend(handles=handles, loc="lower left", bbox_to_anchor=(0.05, 0.02), ncol=3,

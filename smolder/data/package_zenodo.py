@@ -215,7 +215,7 @@ def build_tars():
             print(f"[tar] {tar} exists, kept", flush=True)
             members = []                                      # REBUILD_TARS=1 writes it again
         for m in members:
-            base = str(resolve(m[1:])) if m.startswith("@") else os.path.join(OUT_DIR, m)
+            base = os.path.abspath(str(resolve(m[1:])) if m.startswith("@") else os.path.join(OUT_DIR, m))
             t0 = time.time()
             subprocess.run(["tar", "-cf", dst, "-C", os.path.dirname(base), os.path.basename(base)], check=True)
             print(f"[tar] {tar} {os.path.getsize(dst) / 1e9:.1f} GB ({time.time() - t0:.0f} s)", flush=True)

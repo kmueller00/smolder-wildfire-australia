@@ -4,7 +4,7 @@ no text below 6 pt, no title above the panels (the caption says it).
   fig_national_skill.png        2.4 in  (a) lift against the share of land flagged, SMOLDER and
                                         persistence; (b) daily AUC-PR of both, 7-day running means
   fig_budget_curves.png         2.6 in  fire caught and false alarms per hit against the area flagged
-  fig_distance_bands.png        2.6 in  fire caught by distance to recent fire
+  fig_distance_bands.png        2.4 in  fire caught by distance to recent fire, 2019 best-F2 thresholds
   fig_explain_importance.png    3.0 in  (a) both importance measures per input, (b, c) displaced
                                         share by land cover and climate zone
   fig_events_well_<Y>.png       3.4 in  four events, 2 x 2 layout, three panels each
@@ -43,7 +43,8 @@ PERSIST = os.environ.get("PERSIST", os.path.join(HERE, "..", "results", "nationa
 FIG_OUT = os.environ.get("FIG_OUT", HERE)
 OP_RUN = os.environ.get("OP_RUN", "SMOLDER")
 GREY, LIGHT_BLUE, LIGHT_GREY = "#5F5F64", "#8DB6D9", "#B4B4B9"
-BUDGET = 0.0013
+CRIT = os.environ.get("THRESHOLD_CRIT", "f2")          # adaptive threshold chosen on 2019 by this criterion
+EXPLAIN = os.environ.get("EXPLAIN_JSON", "explain_2020_adaptive_f2.json")
 
 
 def style_axes(ax, **kw):
@@ -106,15 +107,18 @@ def budget_curves():
             c = AB["adaptive_curve"][name]; k, rec, fpt = np.array(c["mean_share"]), np.array(c["recall"]), np.array(c["fp_per_tp"])
         axes[0].plot(100 * k, 100 * rec, color=col, ls=ls, lw=1.3, label=lab)
         axes[1].plot(100 * k, fpt, color=col, ls=ls, lw=1.3)
+    for name, col in (("SMOLDER", ACCENT), ("persistence", GREY)):        # best-F2 threshold of 2019
+        b = AB["adaptive_best"][name][CRIT]
+        axes[0].plot(100 * b["mean_share"], 100 * b["recall"], "o", ms=3.5, mfc="white", mec=col, mew=1.0, zorder=5)
+        axes[1].plot(100 * b["mean_share"], b["fp_per_tp"], "o", ms=3.5, mfc="white", mec=col, mew=1.0, zorder=5)
+    axes[0].plot([], [], "o", ms=3.5, mfc="white", mec=INK, mew=1.0, ls="none", label="threshold chosen on 2019 (best F2)")
     for ax, ylab in zip(axes, ("Fire caught (%)", "False alarms per fire pixel caught")):
-        ax.axvline(100 * BUDGET, color=MUTED, lw=0.7, ls=":", zorder=1)
         ax.set_xscale("log"); ax.set_xlim(0.02, 20)
         ax.set_xticks([0.03, 0.1, 0.3, 1, 3, 10]); ax.set_xticklabels(["0.03", "0.1", "0.3", "1", "3", "10"]); ax.minorticks_off()
         ax.set_xlabel("Mean daily area flagged (% of land)"); ax.set_ylabel(ylab)
     axes[0].set_ylim(0, 100)
     axes[1].set_yscale("log"); axes[1].set_ylim(1, 300)
     axes[1].set_yticks([1, 3, 10, 30, 100, 300]); axes[1].set_yticklabels(["1", "3", "10", "30", "100", "300"]); axes[1].minorticks_off()
-    axes[0].text(100 * BUDGET * 1.12, 3, "0.13 %", fontsize=6, color=INK)
     axes[0].legend(loc="upper left", frameon=True, facecolor="white", edgecolor="#C8C8CC")
     for ax, t in zip(axes, "ab"):
         style_axes(ax); tag(ax, t)
@@ -123,17 +127,15 @@ def budget_curves():
 
 def distance_bands():
     OP = json.load(open(os.path.join(RUN, "operating_point_2020.json")))
-    AB = json.load(open(os.path.join(RUN, "adaptive_budget_2020.json")))
+    AB = json.load(open(os.path.join(RUN, "adaptive_budget_2020.json")))["adaptive_best"]
     bands = ["0-3 km", "3-10 km", "> 10 km"]; share = OP["bands"]["fire_share"]
-    bars = [("Persistence, same area every day", GREY, AB["fixed"]["persistence"]),
-            ("Persistence, one threshold", LIGHT_GREY, AB["adaptive"]["persistence"]),
-            ("SMOLDER, same area every day", ACCENT, AB["fixed"]["SMOLDER"]),
-            ("SMOLDER, one threshold", LIGHT_BLUE, AB["adaptive"]["SMOLDER"])]
-    fig = plt.figure(figsize=(W, 2.6)); ax = fig.add_axes([0.075, 0.2, 0.9, 0.76])
-    x = np.arange(len(bands)); w = 0.19
+    bars = [("Persistence", GREY, AB["persistence"][CRIT]), ("SMOLDER", ACCENT, AB["SMOLDER"][CRIT])]
+    fig = plt.figure(figsize=(W, 2.4)); ax = fig.add_axes([0.075, 0.21, 0.9, 0.75])
+    x = np.arange(len(bands)); w = 0.32
     for j, (lab, col, src) in enumerate(bars):
-        v = [100 * src[str(BUDGET)][f"recall {b}"] for b in bands]; xx = x + (j - 1.5) * w
-        ax.bar(xx, v, w * 0.92, color=col, label=lab, zorder=3)
+        v = [100 * src[f"recall {b}"] for b in bands]; xx = x + (j - 0.5) * w
+        ax.bar(xx, v, w * 0.9, color=col, zorder=3,
+               label=f"{lab} (flags {100 * src['mean_share']:.2f} % of the land per day on average)")
         for xi, vi in zip(xx, v):
             ax.text(xi, vi + 1.2, f"{vi:.1f}" if vi < 10 else f"{vi:.0f}", ha="center", va="bottom", fontsize=6, color=INK)
     ax.set_xticks(x)
@@ -141,12 +143,12 @@ def distance_bands():
     ax.set_xlabel("Distance to the nearest fire detected on the issue day or the two days before")
     ax.set_ylabel("Fire caught (%)"); ax.set_ylim(0, 100)
     style_axes(ax, grid_x=False)
-    ax.legend(loc="upper right", frameon=True, facecolor="white", edgecolor="#C8C8CC", ncol=2)
-    save(fig, "fig_distance_bands.png", 2.6)
+    ax.legend(loc="upper right", frameon=True, facecolor="white", edgecolor="#C8C8CC")
+    save(fig, "fig_distance_bands.png", 2.4)
 
 
 def importance():
-    E = json.load(open(os.path.join(RUN, "explain_2020.json"))); G = E["groups"]
+    E = json.load(open(os.path.join(RUN, EXPLAIN))); G = E["groups"]
     names = sorted(G, key=lambda n: G[n]["retention"])
     disp = np.array([1 - G[n]["retention"] for n in names]); drop = np.array([G[n]["ap_drop"] for n in names])
     fd = lambda key: np.array([max(np.std([1 - v for v in E["folds"][f]["groups"][n]["retention"]]) if key == "r"
@@ -158,7 +160,7 @@ def importance():
     a1.barh(y, disp, height=0.62, color=[ACCENT2 if n == "fire history" else ACCENT for n in names], zorder=3)
     a1.errorbar(disp, y, xerr=fd("r"), fmt="none", ecolor=INK, elinewidth=0.6, capsize=1.5, zorder=4)
     a1.set_xscale("log"); a1.set_xlim(0.008, 1.3); a1.set_xticks([0.01, 0.1, 1]); a1.set_xticklabels(["1", "10", "100"]); a1.minorticks_off()
-    a1.set_yticks(y); a1.set_yticklabels(names, fontsize=6); a1.set_xlabel("Top-1 % pixels\ndisplaced (%)")
+    a1.set_yticks(y); a1.set_yticklabels(names, fontsize=6); a1.set_xlabel("Flagged pixels no\nlonger flagged (%)")
     a2.barh(y, 100 * drop, height=0.62, color=[ACCENT2 if n == "fire history" else LIGHT_BLUE for n in names], zorder=3)
     a2.set_xlim(min(-2, 100 * drop.min() - 1), 100 * drop.max() * 1.15); a2.set_xlabel("Relative fall of\nAUC-PR (%)")
     a2.tick_params(labelleft=False); a2.axvline(0, color=INK, lw=0.5)

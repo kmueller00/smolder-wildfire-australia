@@ -32,14 +32,15 @@ from sklearn.metrics import roc_auc_score
 from smolder.data.io import open_zarr_root
 
 YEARS = (2015, 2016, 2017, 2018, 2019)
-LAGS = [0, 1, 2, 3, 5, 7, 10, 14, 21, 28, 30, 35, 42, 56, 70, 90, 110, 130, 150, 180]
+LAGS = [int(v) for v in os.environ["LAGS"].split(",")] if os.environ.get("LAGS") else \
+    [0, 1, 2, 3, 5, 7, 10, 14, 21, 28, 30, 35, 42, 56, 70, 90, 110, 130, 150, 180]
 N_SAMPLES = int(os.environ.get("N_SAMPLES", 400_000))
 DAYS_PER_CELL = int(os.environ.get("DAYS_PER_CELL", 40))
 LAI_DIR = os.environ.get("LAI_DIR", "/home/saturn/gwgi/gwgi107h/wildfire_data/lai/HiQ_LAI_1km")
 LAI_LAG, NDVI_LAG = 31, 7
 START = dt.date(2015, 1, 1)
 OFF = {y: (dt.date(y, 1, 1) - START).days for y in range(2015, 2021)}
-VARS = ["LAI", "NDVI", "VPD", "TMAX", "SM", "PPT", "WIND"]
+VARS = os.environ.get("VARS", "LAI,NDVI,VPD,TMAX,SM,PPT,WIND").split(",")
 LAT0, LON0, PX = -9.005000114, 112.904998779, 0.009997121616580312
 G = {}
 
@@ -107,6 +108,8 @@ def cell(args):
     land = np.argwhere(lm)
     t_lo = max(g0, lag + LAI_LAG + NDVI_LAG)                     # every variable exists
     t_hi = g0 + n_days - 3                                       # window D+1..D+3 inside the year
+    if t_hi - t_lo < DAYS_PER_CELL:                              # lag longer than the history of this year
+        return year, lag, {}
     days = rng.choice(np.arange(t_lo, t_hi), size=min(DAYS_PER_CELL, t_hi - t_lo), replace=False)
     per = max(1, N_SAMPLES // len(days))
     lab, fire_d, vals = [], [], {v: [] for v in VARS}
@@ -116,18 +119,18 @@ def cell(args):
         lab.append(np.asarray(G["cube"][y]["y_fire_3d"][i], np.uint8)[yy, xx] > 0)
         fire_d.append(np.asarray(G["firms"][t], np.uint8)[yy, xx] > 0)
         s = int(t) - lag
-        X = G["cube"][_day(s)[0]]["X"][_day(s)[1]]
-        X = np.asarray(X, np.float32)
-        vals["SM"].append(X[yy, xx, G["ch"]["sm"]]); vals["PPT"].append(X[yy, xx, G["ch"]["precip"]])
-        vals["WIND"].append(X[yy, xx, G["ch"]["wind"]])
-        vals["NDVI"].append(_X(s - NDVI_LAG, yy, xx, G["ch"]["ndvi"]))
-        vals["LAI"].append(_lai(s, yy, xx))
-        vals["VPD"].append(_barra("vpd", s, yy, xx)); vals["TMAX"].append(_barra("tasmax", s, yy, xx))
+        X = np.asarray(G["cube"][_day(s)[0]]["X"][_day(s)[1]], np.float32) if {"SM", "PPT", "WIND"} & set(VARS) else None
+        get = {"SM": lambda: X[yy, xx, G["ch"]["sm"]], "PPT": lambda: X[yy, xx, G["ch"]["precip"]],
+               "WIND": lambda: X[yy, xx, G["ch"]["wind"]], "NDVI": lambda: _X(s - NDVI_LAG, yy, xx, G["ch"]["ndvi"]),
+               "LAI": lambda: _lai(s, yy, xx), "VPD": lambda: _barra("vpd", s, yy, xx),
+               "TMAX": lambda: _barra("tasmax", s, yy, xx)}
+        for v in VARS:
+            vals[v].append(get[v]())
     lab = np.concatenate(lab); out = {}
     for v in VARS:
         x = np.concatenate(vals[v]); m = np.isfinite(x)
         out[v] = dict(roc_auc=float(roc_auc_score(lab[m], x[m])), n=int(m.sum()), fire_frac=float(lab[m].mean()))
-    if lag == 0:
+    if lag == 0 and os.environ.get("FIRE_D", "1") == "1":
         f = np.concatenate(fire_d).astype(np.float32)
         out["fire on the issue day"] = dict(roc_auc=float(roc_auc_score(lab, f)), n=int(len(lab)),
                                             fire_frac=float(lab.mean()))
@@ -144,19 +147,22 @@ def main():
             print(f"[lag] {year} lag {lag}", flush=True)
     summary = {}
     for v, by_lag in res.items():
-        mean = {int(l): float(np.mean([d["roc_auc"] for d in yrs.values()])) for l, yrs in by_lag.items()}
+        mean = {int(l): float(np.mean([d["roc_auc"] for d in yrs.values()])) for l, yrs in by_lag.items() if yrs}
+        n_years = {int(l): len(yrs) for l, yrs in by_lag.items()}
         lags = sorted(mean)
         best = max(lags, key=lambda l: abs(mean[l] - 0.5))
-        summary[v] = dict(roc_auc_by_lag={str(l): mean[l] for l in lags}, best_lag=best, roc_auc_best=mean[best],
+        summary[v] = dict(roc_auc_by_lag={str(l): mean[l] for l in lags}, n_years_by_lag={str(l): n_years[l] for l in lags},
+                          best_lag=best, roc_auc_best=mean[best],
                           roc_auc_lag0=mean.get(0), roc_auc_lag30=mean.get(30),
                           note="best lag = largest distance of the ROC-AUC from 0.5 (values below 0.5: lower values precede fire)")
     out = dict(method=__doc__.split("Writes")[0].strip(), years=list(YEARS), lags=LAGS, n_samples=N_SAMPLES,
                days_per_cell=DAYS_PER_CELL, summary=summary, per_year=res)
-    p = os.path.join(os.path.dirname(__file__), "..", "..", "results", "lag_analysis_causal.json")
+    p = os.path.join(os.path.dirname(__file__), "..", "..", "results", os.environ.get("OUT_NAME", "lag_analysis_causal.json"))
     json.dump(out, open(p, "w"), indent=1)
     for v, s in summary.items():
         print(f"{v:24s} best lag {s['best_lag']:4d}  AUC {s['roc_auc_best']:.4f}  lag0 {s['roc_auc_lag0']:.4f}  "
               f"lag30 {s['roc_auc_lag30'] if s['roc_auc_lag30'] is not None else float('nan'):.4f}")
+        print("   " + "  ".join(f"{l}:{a:.3f}({s['n_years_by_lag'][l]})" for l, a in s["roc_auc_by_lag"].items()))
 
 
 if __name__ == "__main__":

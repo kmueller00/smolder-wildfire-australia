@@ -1,6 +1,6 @@
 # Supplementary figures
 
-Figures that accompany the paper but are not part of it. The six result
+Figures that accompany the paper but are not part of it. The five result
 figures (`fig_*`) currently show the provisional model B (results in
 `results/experiments/smolder/full_model_windalign_seed123/`); they will be
 replaced by the final model's versions under the same file names. The maps of
@@ -9,13 +9,6 @@ Scripts: `figures/make_national_figures.py`, `make_gt_vs_pred.py`,
 `make_convergence_figure.py`, `make_explain_figures.py`, `make_input_maps.py`.
 
 ## Results
-
-**fig_national_example.png.** National forecast issued on 15 November 2020,
-the most fire-active issue day of the test year. Colours show the predicted
-risk of fire on 16 to 18 November as a percentile across Australia's land; the
-1 % of the land with the highest risk is hatched. Observed fire of the three
-days is shown in green inside this area and in purple outside it. Displayed
-at 0.04 deg.
 
 **fig_national_maps.png.** Annual picture for 2020. (a) Mean predicted risk
 score over all issue days. (b) Number of issue days with fire in the three-day
@@ -27,28 +20,33 @@ deterministic rule (fire-active patches, one per month, the four with the most
 fire). For each forecast, the left panel shows the fire detected in the three
 days after the issue day, with the location of the patch in Australia (inset,
 red outline), and the right panel the risk map issued on that day as a
-percentile within the patch, with the 1 % of the patch with the highest risk
-hatched. Observed fire is green inside this area and purple outside it; black
-lines are the coastline.
+percentile within the patch. Hatched: the pixels whose score lies above the
+threshold chosen on 2019 (best F2), the same threshold for every forecast, so
+the flagged area varies with the situation. Observed fire is green inside this
+area and purple outside it; black lines are the coastline.
 
 **fig_convergence.png.** Training convergence. (a) Training and validation
 loss. (b) Average precision on the 1024 validation patches of 2019 at every
 epoch; the orange markers show the three epochs whose weights were averaged
 into the model.
 
-**fig_explain_prefire.png.** Median of the inputs over the model's look-back
-window for pixels that burned in the next three days (orange) and for
-randomly drawn pixels that did not burn (blue, dashed), by land cover, 2020:
-soil moisture index, precipitation per 8 days and leaf area index over the
-144 days of the slow branch, vapour pressure deficit over the 14 days of the
-fast branch.
+**fig_explain_prefire.png.** How pixels that burned in the three days after
+the issue day differed beforehand from pixels of the same patch and issue day
+that did not burn, 2020: (a) soil moisture index, (b) rain per 8 days, (c) leaf
+area index, (d) vapour pressure deficit. Line: mean difference over patches,
+weighted by the number of burned pixels; band: 95 % bootstrap interval over
+patches; above zero means higher in burned pixels. Comparing within a patch
+removes differences of region and season. Slow inputs are 8-day periods drawn
+at their centre; leaf area index is drawn at the date it was observed, 31 days
+before the model receives it.
 
-**fig_explain_conditions.png.** Conditions on the issue day by forecast
-outcome, 2020, by climate zone: pixels in the national top 1 % that burned
-(true positive), in the top 1 % without fire (false positive), burned outside
-the top 1 % (false negative) and neither (true negative). Each violin is cut at
-its group's 1st and 99th percentile; the thick line is the median, the thin
-lines the interquartile range.
+**fig_explain_conditions.png.** Forecast outcomes in 2020 with the threshold
+chosen on 2019 (best F2): caught (flagged, burned), missed (burned, not
+flagged), false alarm (flagged, no fire) and other land (neither). (a) Share of
+each outcome by distance to the nearest fire detected on the issue day or the
+two days before. (b to e) Conditions on the issue day by outcome and climate
+zone: median (dot) and middle half (bar) of the pixels. Pixels are weighted to
+the true size of their outcome in each patch.
 
 ## Input data, 2015 to 2020
 
