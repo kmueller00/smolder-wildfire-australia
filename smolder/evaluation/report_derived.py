@@ -10,6 +10,9 @@ For YEAR (default 2019) and the run RUN (default the final model):
   ratios           SMOLDER over persistence: pooled AUC-PR (national_<YEAR>.json and the
                    persistence file), precision and flagged area at the best-F2 thresholds;
                    pooled AUC-PR over the base rate of the year, for both
+  f2_hindsight     the best F2 on the year's threshold sweep (adaptive_curve) against the
+                   F2 at the threshold used; a diagnostic of how well the 2019 threshold
+                   transfers, not a choice
   common_days      (YEAR=2019 only) daily AUC-PR of the final model and of model B
                    (earlier inputs) on the issue days both were evaluated on: mean of
                    each, share of days on which the final model is higher
@@ -57,6 +60,15 @@ def main():
                          auc_pr_over_base_rate_persistence=P["pooled_auc_pr"] / P["base_rate"],
                          area_f2_SMOLDER_over_persistence=ab["SMOLDER"]["f2"]["mean_share"]
                          / ab["persistence"]["f2"]["mean_share"])
+    # diagnostic, no choice: the best F2 on this year's threshold sweep against the F2
+    # of the threshold actually used (chosen on 2019); precision = 1 / (1 + fp_per_tp)
+    curve = json.load(open(os.path.join(RUN_DIR, f"adaptive_budget_{YEAR}.json")))["adaptive_curve"]
+    out["f2_hindsight"] = {}
+    for name in ("SMOLDER", "persistence"):
+        rec = np.array(curve[name]["recall"]); pre = 1.0 / (1.0 + np.array(curve[name]["fp_per_tp"]))
+        f2 = 5 * pre * rec / np.maximum(4 * pre + rec, 1e-12); i = int(np.nanargmax(f2))
+        out["f2_hindsight"][name] = dict(f2_best_on_sweep=float(f2[i]), mean_share_there=float(curve[name]["mean_share"][i]),
+                                        f2_at_threshold_used=ab[name]["f2"]["f2"])
     if YEAR == 2019 and os.path.exists(MODEL_B):
         a = pd.read_csv(os.path.join(RUN_DIR, f"national_{YEAR}_daily.csv"))[["date", "auc_pr"]]
         b = pd.read_csv(MODEL_B)[["date", "auc_pr"]]

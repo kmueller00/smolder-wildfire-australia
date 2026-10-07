@@ -57,6 +57,18 @@
   "auc_pr_over_base_rate_persistence": 112.13339630371152,
   "area_f2_SMOLDER_over_persistence": 0.5812255700963193
  },
+ "f2_hindsight": {
+  "SMOLDER": {
+   "f2_best_on_sweep": 0.3294453402986171,
+   "mean_share_there": 0.001112293390267492,
+   "f2_at_threshold_used": 0.3294453402986171
+  },
+  "persistence": {
+   "f2_best_on_sweep": 0.2213714883893331,
+   "mean_share_there": 0.0019137034698648333,
+   "f2_at_threshold_used": 0.2213714883893331
+  }
+ },
  "common_days": {
   "n_days": 349,
   "n_days_final": 349,
