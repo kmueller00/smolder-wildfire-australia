@@ -42,17 +42,24 @@ OUT_DIR = os.environ["OUT_DIR"]
 YEAR = int(os.environ.get("YEAR", 2020))
 WORKERS = int(os.environ.get("WORKERS", 8))
 BARRA_FROM = int(os.environ.get("BARRA_FROM", 1824))        # 2019-12-31; must be a multiple of the chunk length
-NDVI_FROM = int(os.environ.get("NDVI_FROM", 1824))
+NDVI_FROM = int(os.environ.get("NDVI_FROM", 1792))           # the 7-day NDVI lag reaches back to late 2019
+CAUSAL = os.environ.get("CAUSAL_INPUTS", "1") == "1"         # package for the model with causal inputs
 CHANNELS = ["sm", "wind", "vpd", "precip", "lst_day", "ndvi", "lai"]
+BARRA_NAME = "barra_c2_fast_tmax.zarr" if CAUSAL else "barra_c2_fast.zarr"
+SLOW_NAME = "cube_slow_8day_lai500m_lag31.zarr" if CAUSAL else "cube_slow_8day_lai500m.zarr"
 TARS = {"cube_2020_zenodo.tar": ["cube_2020_zenodo.zarr"],
-        "cube_slow_8day_lai500m.tar": ["@cube_slow_8day_lai500m.zarr"],
+        SLOW_NAME.replace(".zarr", ".tar"): ["@" + SLOW_NAME],
         "fire_inputs_continental.tar": ["@fire_inputs_continental.zarr"],
-        "barra_c2_fast_2020.tar": ["barra_c2_fast.zarr"],     # "@": taken from SMOLDER_DATA
+        BARRA_NAME.replace(".zarr", "_2020.tar"): [BARRA_NAME],   # "@": taken from SMOLDER_DATA
         "ndvi_composites_2020.tar": ["ndvi_composites.zarr"]}
+if CAUSAL:
+    TARS.update({"agb_yearly.tar": ["@agb_yearly.zarr"], "landcover_yearly.tar": ["@landcover_yearly.zarr"]})
 
 
-LEAN_CHANNELS = ["wind", "lst_day"]
+LEAN_CHANNELS = ["wind"] if CAUSAL else ["wind", "lst_day"]
 LEAN_DROP = {"lightning", "y_fire_8d", "y_fire_8d_trailing_backup", "y_fire_8d_valid", "y_fire_h1"}
+if CAUSAL:   # biomass and land cover of the year come from agb_yearly / landcover_yearly
+    LEAN_DROP |= {"agb", "landcover"}
 
 
 def build_cube():
@@ -63,9 +70,11 @@ def build_cube():
         if name != "X" and name not in LEAN_DROP:
             zarr.copy(a, out, name=name)
     attrs = dict(old.attrs)
-    attrs.update(channels=LEAN_CHANNELS, note="Daily inputs the SMOLDER model reads from this cube: 10 m wind "
-                 "speed and land surface temperature, native units, missing = NaN. Other inputs are in the "
-                 "companion stores of this record.")
+    attrs.update(channels=LEAN_CHANNELS, note=("Daily input the SMOLDER model reads from this cube: 10 m wind "
+                 "speed (m/s), missing = NaN. Other inputs, including biomass and land cover per year, are in the "
+                 "companion stores of this record.") if CAUSAL else ("Daily inputs the SMOLDER model reads from this "
+                 "cube: 10 m wind speed and land surface temperature, native units, missing = NaN. Other inputs are "
+                 "in the companion stores of this record."))
     out.attrs.update(attrs)
     ox = old["X"]
     T, H, W, _ = ox.shape
@@ -120,12 +129,12 @@ def build_ndvi():
 
 
 def build_barra():
-    src_path = str(resolve("barra_c2_fast.zarr"))
+    src_path = str(resolve(BARRA_NAME))
     src = zarr.open_group(src_path, mode="r")
     x = src["x"]
     tc = x.chunks[0]
     assert BARRA_FROM % tc == 0, (BARRA_FROM, tc)
-    dst = os.path.join(OUT_DIR, "barra_c2_fast.zarr")
+    dst = os.path.join(OUT_DIR, BARRA_NAME)
     if os.path.exists(dst):
         shutil.rmtree(dst)
     os.makedirs(os.path.join(dst, "x"))
@@ -157,10 +166,10 @@ def check(n=6):
     full_dir = os.environ["SMOLDER_DATA"]
     arch = os.path.join(OUT_DIR, "check_data")
     os.makedirs(arch, exist_ok=True)
-    links = {"barra_c2_fast.zarr": os.path.join(OUT_DIR, "barra_c2_fast.zarr"),
+    links = {BARRA_NAME: os.path.join(OUT_DIR, BARRA_NAME),
              "ndvi_composites.zarr": os.path.join(OUT_DIR, "ndvi_composites.zarr"),
              f"cube_{YEAR}_zenodo.zarr": os.path.join(OUT_DIR, f"cube_{YEAR}_zenodo.zarr")}
-    for m in ("cube_slow_8day_lai500m.zarr", "fire_inputs_continental.zarr"):
+    for m in (SLOW_NAME, "fire_inputs_continental.zarr") + (("agb_yearly.zarr", "landcover_yearly.zarr") if CAUSAL else ()):
         links[m] = os.path.join(full_dir, m)
     for name, target in links.items():
         p = os.path.join(arch, name)
@@ -172,9 +181,9 @@ def check(n=6):
               fire_history=True, fire_history_lags=(3, 4, 5), fire_history_distance=True,
               use_elevation=True, use_slope_aspect=True, use_fuel_age=True, fuel_age_lookback=1095,
               vpd_source="barra", use_frp=True, use_barra_uv=True, slow_veg="lai500", use_fast_ndvi=True,
-              perfect_forecast=False, use_vpd_anomaly=False)
+              perfect_forecast=False, use_vpd_anomaly=False, causal_inputs=CAUSAL, use_wind_align=CAUSAL)
     ref = DualWindowDataset(DualPatchConfig(zarr_paths=(os.path.join(full_dir, f"cube_daily_smgrid_{YEAR}.zarr"),),
-                                            fast_stores=False, **kw))
+                                            fast_stores=True, **kw))      # the path training and evaluation use
     os.environ["SMOLDER_DATA"] = arch
     new = DualWindowDataset(DualPatchConfig(zarr_paths=(f"cube_{YEAR}_zenodo.zarr",), fast_stores=True, **kw))
     os.environ["SMOLDER_DATA"] = full_dir

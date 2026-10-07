@@ -132,6 +132,12 @@ LINE = "#3A3A3E"
 FUSE = "#6B46C1"
 STATIC = "#4A7A4A"
 TIMES = "×"
+PAPER = os.environ.get("PAPER", "0") == "1"       # print size: 6.93 x 3.2 in, 450 dpi, nothing below 6 pt
+
+
+def F(size):
+    """Font size: unchanged, or on the printed page (scaled, at least 6 pt)."""
+    return max(6.0, round(0.74 * size, 2)) if PAPER else size
 
 
 def rect(ax, x, y, w, h, ec=FRAME_EC, fc="none", lw=1.2, z=1):
@@ -166,7 +172,7 @@ def stack(ax, frames, x, y, size, cmap, vmin, vmax, dx=None, dy=None, z0=3):
                   vmin=vmin, vmax=vmax, interpolation="nearest", zorder=z, origin="upper")
         rect(ax, ox, oy, size, size, ec="#555558", lw=0.45, z=z + 1)
     coast(ax, x, y, size, z0 + 3 * n)
-    ax.text(x + size + (n - 1) * dx + 0.4, y + size + (n - 1) * dy - 0.2, f"{n}", fontsize=7.2,
+    ax.text(x + size + (n - 1) * dx + 0.4, y + size + (n - 1) * dy - 0.2, f"{n}", fontsize=F(7.2),
             color=MUTED, ha="left", va="top")
     return x + (size + (n - 1) * dx) / 2          # horizontal centre of the stack
 
@@ -184,7 +190,7 @@ def with_bad(name, bad=OCEAN):
 
 
 def label(ax, x, y, text, **kw):
-    kw.setdefault("fontsize", 8.4)
+    kw["fontsize"] = kw.get("fontsize", F(8.4))
     kw.setdefault("color", INK)
     ax.text(x, y, text, ha="center", va="top", linespacing=1.25, **kw)
 
@@ -195,7 +201,7 @@ def box(ax, x, y, w, h, ec, lines, lw=1.6):
     n = len(lines)
     for i, (t, fs, bold, col) in enumerate(lines):
         yy = y + h / 2 + (n - 1) / 2 * 3.0 - i * 3.0
-        ax.text(x + w / 2, yy, t, ha="center", va="center", fontsize=fs, color=col,
+        ax.text(x + w / 2, yy, t, ha="center", va="center", fontsize=F(fs), color=col,
                 fontweight="bold" if bold else "normal", zorder=4)
 
 
@@ -212,7 +218,9 @@ def draw():
     LAND = np.asarray(d["land"])
     cs = int(d["c_slow"]) if "c_slow" in d else 17
     cf = int(d["c_fast"]) if "c_fast" in d else 21
-    fig, ax = plt.subplots(figsize=(12.6, 7.4))
+    fig, ax = plt.subplots(figsize=(6.93, 3.2) if PAPER else (12.6, 7.4))
+    if PAPER:
+        fig.subplots_adjust(left=0.005, right=0.995, bottom=0.01, top=0.99)
     ax.set_xlim(0, 126)
     ax.set_ylim(7, 81)
     ax.axis("off")
@@ -221,9 +229,9 @@ def draw():
     for tag, (x, w, title) in {"a": (23, 40, "ConvLSTM encoders"), "b": (65, 33, "Fusion"),
                                "c": (100, 25, "Output")}.items():
         rect(ax, x, 8, w, 72, lw=1.3, z=0)
-        ax.text(x + 1.2, 78.6, f"({tag})  {title}", fontsize=11.5, fontweight="bold",
+        ax.text(x + 1.2, 78.6, f"({tag})  {title}", fontsize=F(11.5), fontweight="bold",
                 color=INK, va="top", ha="left")
-    ax.text(1.0, 78.6, "Inputs", fontsize=11.5, fontweight="bold", color=INK, va="top", ha="left")
+    ax.text(1.0, 78.6, "Inputs", fontsize=F(11.5), fontweight="bold", color=INK, va="top", ha="left")
 
     # ---- inputs and (a) unrolled ConvLSTM chains
     xs = [27.0, 38.8, 50.6]
@@ -238,24 +246,24 @@ def draw():
         ax.plot([21.0, xs[-1] + 4.0], [feed, feed], color=col, lw=1.1, zorder=5)
         for j, xc in enumerate(xs):
             rect(ax, xc, yc - 4.2, 8.0, 8.4, ec=col, fc="white", lw=1.6, z=3)
-            ax.text(xc + 4.0, yc + 0.9, "ConvLSTM", ha="center", va="center", fontsize=6.6,
+            ax.text(xc + 4.0, yc + 0.9, "ConvLSTM", ha="center", va="center", fontsize=F(6.6),
                     color=col, fontweight="bold", zorder=4)
-            ax.text(xc + 4.0, yc - 1.7, "cell", ha="center", va="center", fontsize=6.8, color=col, zorder=4)
+            ax.text(xc + 4.0, yc - 1.7, "cell", ha="center", va="center", fontsize=F(6.8), color=col, zorder=4)
             arrow(ax, xc + 4.0, feed, xc + 4.0, yc - 4.3, c=col, lw=1.1)
             ax.text(xc + 4.6, feed + 1.0, ["x (t−2)", "x (t−1)", "x (t)"][j], ha="left",
-                    va="bottom", fontsize=7.0, color=INK)
+                    va="bottom", fontsize=F(7.0), color=INK)
             if j < 2:
                 arrow(ax, xc + 8.0, yc, xs[j + 1], yc, c=col, lw=1.3)
-                ax.text(xc + 9.9, yc + 1.0, "h, c", ha="center", fontsize=6.8, color=INK)
-        ax.text(42.8, yc + 6.4, steps, ha="center", fontsize=8.2, color=INK)
-    ax.text(43.0, 70.6, "final hidden state (384, 384, 64)", ha="center", fontsize=7.8, color=ACCENT)
-    ax.text(43.0, 15.2, "hidden state at every step (14, 384, 384, 64)", ha="center", fontsize=7.8,
+                ax.text(xc + 9.9, yc + 1.0, "h, c", ha="center", fontsize=F(6.8), color=INK)
+        ax.text(42.8, yc + 6.4, steps, ha="center", fontsize=F(8.2), color=INK)
+    ax.text(43.0, 70.6, "final hidden state (384, 384, 64)", ha="center", fontsize=F(7.8), color=ACCENT)
+    ax.text(43.0, 15.2, "hidden state at every step (14, 384, 384, 64)", ha="center", fontsize=F(7.8),
             color=ACCENT2)
 
     # ---- (b) fusion: attention, concatenation, output head
     bx, bw = 68.5, 26.0
-    box(ax, bx, 50.0, bw, 15.0, FUSE, [("Cross-attention", 9.2, True, FUSE), ("4 heads, per pixel", 8.0, False, INK),
-                                        ("+ residual, layer norm", 8.0, False, INK)], lw=1.8)
+    box(ax, bx, 50.0, bw, 15.0, FUSE, [("Projection of the slow state,", 8.6, True, FUSE),
+                                        ("added to the fast state,", 8.0, False, INK), ("layer norm", 8.0, False, INK)], lw=1.8)
     box(ax, bx, 34.0, bw, 10.5, FUSE, [("Concatenate", 9.2, True, FUSE), ("(14, 384, 384, 128)", 8.4, False, INK)],
         lw=1.8)
     box(ax, bx, 17.0, bw, 10.5, INK, [(f"5 {TIMES} 5 conv, sigmoid", 9.2, True, INK),
@@ -263,14 +271,14 @@ def draw():
     arrow(ax, bx + bw / 2, 50.0, bx + bw / 2, 44.6)
     arrow(ax, bx + bw / 2, 34.0, bx + bw / 2, 27.6)
     ax.text(bx + bw / 2, 15.0, "applied at every fast step;\nthe last step is the forecast",
-            ha="center", va="top", fontsize=7.8, color=INK, linespacing=1.25)
-    # slow state: key and value of the attention, and the second half of the concatenation
+            ha="center", va="top", fontsize=F(7.8), color=INK, linespacing=1.25)
+    # slow state: projected and added to the fast state, and the second half of the concatenation
     path(ax, [(58.6, 62.0), (bx, 62.0)], ACCENT)
     path(ax, [(66.0, 62.0), (66.0, 68.5), (96.6, 68.5), (96.6, 39.25), (bx + bw, 39.25)], ACCENT, lw=1.2)
-    ax.text(60.8, 62.8, "K, V", ha="center", fontsize=8.2, color=ACCENT, fontweight="bold")
-    # fast state: query
+    ax.text(60.8, 62.8, "slow", ha="center", fontsize=F(8.2), color=ACCENT, fontweight="bold")
+    # fast state
     path(ax, [(58.6, 30.0), (64.0, 30.0), (64.0, 54.0), (bx, 54.0)], ACCENT2)
-    ax.text(60.8, 30.8, "Q", ha="center", fontsize=8.2, color=ACCENT2, fontweight="bold")
+    ax.text(60.8, 30.8, "fast", ha="center", fontsize=F(8.2), color=ACCENT2, fontweight="bold")
 
     # ---- (c) output
     arrow(ax, bx + bw, 25.0, 103.0, 25.0)
@@ -281,10 +289,14 @@ def draw():
         out = np.where(d["land"][None], np.asarray(d["target"], np.float32), np.nan)
         cm_out, vmin, vmax, lab = ListedColormap(["#F2F2F4", "#B2182B"]), 0, 1, "Observed target\n(VIIRS fire)"
     c = stack(ax, out, 103.5, 20.0, 13.0, cm_out, vmin, vmax)
-    label(ax, c, 18.4, lab, fontsize=9.0, fontweight="bold")
-    label(ax, c, 13.0, "Fire on days D+1 to D+3,\none map per fast time step", fontsize=8.0)
+    label(ax, c, 18.4, lab, fontsize=F(9.0), fontweight="bold")
+    label(ax, c, 13.0, "Fire on days D+1 to D+3,\none map per fast time step", fontsize=F(8.0))
 
-    fig.savefig(OUT, dpi=300, bbox_inches="tight", facecolor="white")
+    if PAPER:
+        ax.set_aspect("auto"); ax.set_xlim(0, 126); ax.set_ylim(7, 81)   # imshow forces equal aspect
+        fig.savefig(OUT, dpi=450, facecolor="white")
+    else:
+        fig.savefig(OUT, dpi=300, bbox_inches="tight", facecolor="white")
     print("wrote", OUT)
 
 

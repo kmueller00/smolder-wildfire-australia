@@ -57,7 +57,7 @@ def main():
     firms = open_zarr_root("firms_daily.zarr")["n_det"]
     barra = open_zarr_root("barra_c2_daily.zarr")
     blat, blon = np.asarray(barra["lat"][...]), np.asarray(barra["lon"][...])
-    lai500 = open_zarr_root("cube_slow_8day_lai500.zarr")
+    lai500 = open_zarr_root(os.environ.get("LAI_STORE", "cube_slow_8day_lai500.zarr"))
     bstart = np.asarray(lai500["bin_start_day"][...])
     acc = {}
     def add(name, k, v):
@@ -96,7 +96,7 @@ def main():
             if clean.sum() < 50:
                 continue
             n_events += 1
-            for nm, A in list(X.items()) + list(Bv.items()):
+            for nm, A in (list(X.items()) + list(Bv.items())) if os.environ.get("ONLY_LAI500") != "1" else []:
                 e = A[F + KS, r, c]; ctl = np.nanmean(A[F + KS][:, win[0], win[1]][:, clean], 1)
                 e0 = A[F + K0, r, c]; c0_ = np.nanmean(A[F + K0][win[0], win[1]][clean])
                 for k, de, dc in zip(KS, e, ctl):
@@ -117,7 +117,7 @@ def main():
         ks = sorted(d)
         out["series"][nm] = {str(k): dict(mean=float(np.mean(d[k])), se=float(np.std(d[k]) / np.sqrt(len(d[k]))),
                                           n=len(d[k])) for k in ks}
-    json.dump(out, open(os.path.join(REPO, "results", "leak_audit_event_study_2019.json"), "w"), indent=1)
+    json.dump(out, open(os.path.join(REPO, "results", os.environ.get("OUT_NAME", "leak_audit_event_study_2019.json")), "w"), indent=1)
     print("events", n_events)
     for nm, s in out["series"].items():
         print(nm)

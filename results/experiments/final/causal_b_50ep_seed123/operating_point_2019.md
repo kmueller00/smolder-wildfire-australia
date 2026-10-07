@@ -1,0 +1,21 @@
+Operating points 2019 (349 days; budget = top k % of land pixels per day)
+
+| ranking | criterion | budget | recall | precision | false alarms per fire px | new-fire recall | recall 0-3 km | recall 3-10 km | recall > 10 km | false alarms 0-3 km | 3-10 km | > 10 km |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| persistence | best F1 | 0.13 % | 0.235 | 0.0982 | 9.2 | 0.001 | 0.508 | 0.001 | 0.000 | 99 % | 1 % | 0 % |
+| persistence | best F2 | 0.234 % | 0.340 | 0.0790 | 11.7 | 0.005 | 0.731 | 0.007 | 0.000 | 96 % | 4 % | 0 % |
+| causal_B | best F1 | 0.0574 % | 0.264 | 0.2495 | 3.0 | 0.025 | 0.546 | 0.046 | 0.004 | 90 % | 7 % | 3 % |
+| causal_B | best F2 | 0.13 % | 0.379 | 0.1581 | 5.3 | 0.071 | 0.747 | 0.141 | 0.010 | 78 % | 17 % | 5 % |
+
+Recall and false alarms per fire pixel caught at selected budgets:
+
+| budget | persistence recall | persistence FA/TP | causal_B recall | causal_B FA/TP |
+|---|---|---|---|---|
+| 0.051 % | 0.111 | 7.5 | 0.248 | 2.8 |
+| 0.103 % | 0.198 | 8.6 | 0.345 | 4.5 |
+| 0.208 % | 0.318 | 11.0 | 0.446 | 7.6 |
+| 0.472 % | 0.462 | 17.8 | 0.551 | 14.8 |
+| 0.953 % | 0.564 | 30.1 | 0.629 | 26.9 |
+| 1.92 % | 0.645 | 53.9 | 0.699 | 49.6 |
+| 4.91 % | 0.740 | 121.1 | 0.782 | 114.6 |
+| 9.91 % | 0.812 | 223.7 | 0.837 | 217.0 |

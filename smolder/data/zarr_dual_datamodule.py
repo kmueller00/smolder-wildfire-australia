@@ -444,6 +444,8 @@ class DualWindowDataset(Dataset):
         self.lai500_slow = None                             # fast stores: merged slow store, opened below
         self.lai_first_full_bin = 0
         lai_store = cfg.lai500_lag31_store if self.causal else cfg.lai500_slow_store
+        if fast:                       # the merged slow store holds the LAI and its attributes
+            lai_store = cfg.slow_lai500m_lag31_store if self.causal else cfg.slow_lai500m_store
         lg = open_zarr_root(lai_store)
         assert np.array_equal(np.asarray(lg["bin_start_day"][...]), self.slow_bin_start), "LAI500 bins differ"
         if self.causal:
@@ -525,7 +527,8 @@ class DualWindowDataset(Dataset):
         self.read_slow_idx = [cube_ch.get(c) for c in SLOW_CHANNELS]
         self.read_fast_idx = [cube_ch.get(c) for c in FAST_CHANNELS]
         missing = [c for c, i in zip(FAST_CHANNELS, self.read_fast_idx) if i is None]
-        if missing and not (missing == ["VPD"] and self.vpd_source == "barra"):
+        replaced = ({"VPD"} if self.vpd_source == "barra" else set()) | ({"LST"} if self.causal else set())
+        if missing and not set(missing) <= replaced:          # VPD and (causal) LST come from BARRA-C2
             raise ValueError(f"cube lacks fast-branch channels {missing}")
         if None in self.read_slow_idx and self.slow_cube is None:
             raise ValueError("cube lacks slow-branch channels and no pre-binned slow cube is given")
@@ -557,10 +560,14 @@ class DualWindowDataset(Dataset):
         # agb differs per year -> resolved per-sample in __getitem__.
         self.landmask = g0["landmask"][...].astype(np.uint8)
         self.landmask_f = self.landmask.astype(np.float32)
-        self.cat_stack = np.stack(
-            [g0["landcover"][...].astype(np.int64), g0["koppen_geiger"][...].astype(np.int64)],
-            axis=-1,
-        )
+        if self.causal:                       # land cover per year from landcover_store (below)
+            self.cat_stack = np.stack([np.zeros(g0["koppen_geiger"].shape, np.int64),
+                                       g0["koppen_geiger"][...].astype(np.int64)], axis=-1)
+        else:
+            self.cat_stack = np.stack(
+                [g0["landcover"][...].astype(np.int64), g0["koppen_geiger"][...].astype(np.int64)],
+                axis=-1,
+            )
         self._agb_cache: Dict[int, np.ndarray] = {}
         if self.causal:
             ag = open_zarr_root(cfg.agb_store)

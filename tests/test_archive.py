@@ -30,7 +30,7 @@ YEAR, OFFSET, PATCH = 2020, 1826, 384
 FULL = dict(fire_history=True, fire_history_lags=(3, 4, 5), fire_history_distance=True,
             use_elevation=True, use_slope_aspect=True, use_fuel_age=True, fuel_age_lookback=1095,
             vpd_source="barra", use_frp=True, use_barra_uv=True, slow_veg="lai500", use_fast_ndvi=True,
-            perfect_forecast=False, use_vpd_anomaly=False, use_wind_align=False)
+            perfect_forecast=False, use_vpd_anomaly=False, use_wind_align=True, causal_inputs=True)
 
 
 def build(data_dir, cube, fast):
@@ -45,13 +45,13 @@ def main():
     full_dir, arch_dir = os.environ["SMOLDER_DATA"], os.environ["ARCHIVE_DIR"]
     os.chdir(arch_dir)                                    # nothing else resolvable from the cwd
     assert sorted(p for p in os.listdir(arch_dir) if p.endswith(".zarr")) == sorted(
-        ["cube_2020_zenodo.zarr", "cube_slow_8day_lai500m.zarr", "fire_inputs_continental.zarr",
-         "barra_c2_fast.zarr", "ndvi_composites.zarr"]), os.listdir(arch_dir)
+        ["cube_2020_zenodo.zarr", "cube_slow_8day_lai500m_lag31.zarr", "fire_inputs_continental.zarr",
+         "barra_c2_fast_tmax.zarr", "ndvi_composites.zarr", "agb_yearly.zarr", "landcover_yearly.zarr"]), os.listdir(arch_dir)
     ref = build(full_dir, os.path.join(full_dir, f"cube_daily_smgrid_{YEAR}.zarr"), True)
     orig = build(full_dir, os.path.join(full_dir, f"cube_daily_smgrid_{YEAR}.zarr"), False)
     arc = build(arch_dir, f"cube_{YEAR}_zenodo.zarr", True)
     lay = arc.channel_layout()["fast"]
-    barra = sorted(lay["VPD"] + lay.get("wind u/v", []))
+    barra = sorted(lay["VPD"] + lay.get("TMAX", []) + lay.get("wind u/v", []) + lay.get("downwind alignment", []))   # interpolated from BARRA-C2
     os.environ["SMOLDER_DATA"] = arch_dir
     assert np.array_equal(ref.targets, arc.targets)
     model = None
