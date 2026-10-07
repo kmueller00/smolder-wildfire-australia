@@ -70,7 +70,11 @@ def summarize(csv):
 
 
 def importance():
-    E = json.load(open(os.path.join(RES, "explain_2020.json")))
+    path = os.path.join(RES, os.environ.get("EXPLAIN_JSON", "explain_2020.json"))
+    if not os.path.exists(path) or os.environ.get("SKIP_IMPORTANCE") == "1":
+        print("skipped the large importance figure (paper version: make_paper_figures.py)")
+        return
+    E = json.load(open(path))
     G = E["groups"]
     names = sorted(G, key=lambda n: G[n]["retention"])
     change = np.array([1 - G[n]["retention"] for n in names])

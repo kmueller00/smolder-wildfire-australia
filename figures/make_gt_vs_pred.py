@@ -84,7 +84,7 @@ def compute():
         b = ds[i]
         land = b["mask"].numpy() > 0.5
         truth = (b["y"][-1].numpy() > 0) & land
-        iso = times[int(b["t_end"])]
+        iso = times[int(b["t_end"]) - 1]                # issue day D = t_end - 1
         if truth.sum() >= 250 and land.mean() > 0.65 and iso[:7] not in seen:
             seen.add(iso[:7])
             picks.append((int(truth.sum()), iso, b, land, truth))

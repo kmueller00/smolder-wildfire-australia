@@ -17,20 +17,26 @@ next three days. Pixels whose score is above a fixed threshold are flagged.
 
 How good is that? The natural yardstick is **persistence**, the rule a fire
 manager would use without any model: "fire is likely next to fire that is
-already burning". On the validation year 2019, SMOLDER
+already burning". On the test year 2020, which played no part in building the
+model, SMOLDER
 
-- flags less land than persistence (0.111 % against 0.191 % of Australia per
-  day on average) and still catches more of the fire that follows (39.8 %
-  against 33.3 %), with about twice the precision (0.1946 against 0.0945);
-- ranks pixels better than persistence on every single day of the year
-  (daily AUC-PR higher on 100 % of 349 days);
-- reaches an AUC-PR of 0.2091, 3.4 times that of persistence (0.0609), where
-  a random ranking would score the base rate of 0.0543 %.
+- flags about half as much land as persistence (0.071 % against 0.140 % of
+  Australia per day on average) and still catches more of the fire that
+  follows (30.5 % against 27.8 %), with about twice the precision (0.1365
+  against 0.0630);
+- ranks pixels better than persistence on 348 of 350 days (daily AUC-PR);
+- reaches an AUC-PR of 0.1206, 3.3 times that of persistence (0.0361), where
+  a random ranking would score the base rate of 0.0317 %.
+
+The validation year 2019, on which the model and its threshold were chosen,
+gives the same picture (AUC-PR 0.2091 against 0.0609); fire was more common
+in 2019, and relative to each year's base rate the skill is almost the same
+(381 and 385 times the base rate).
 
 What it cannot do: predict a fire that starts far from any fire already
-burning. Of the fire it catches, 91.2 % lies within 3 km of fire detected in
-the last three days, and fire more than 10 km away is almost never caught
-(0.6 %). A lightning strike or a spark leaves no trace in 1 km daily weather
+burning. Of the fire it catches in 2020, 91.1 % lies within 3 km of fire
+detected in the last three days, and of the fire more than 10 km away it
+catches 0.6 %. A lightning strike or a spark leaves no trace in 1 km daily weather
 and vegetation data, and none of the inputs we tested changed that.
 
 Every input contains only information that was available on the day the
@@ -39,23 +45,23 @@ forecast is issued. This was checked input by input (see
 because satellite products are often smoothed or gap-filled with later data,
 which would make a forecast look better than it can be in practice.
 
-> **Test year 2020.** The numbers above are from 2019, the year used to choose
-> the model and its threshold. The single evaluation of the final model on the
-> test year 2020 is added below once it has finished.
+| | test year 2020: SMOLDER | persistence | validation year 2019: SMOLDER | persistence |
+|---|---|---|---|---|
+| issue days | 350 | 350 | 349 | 349 |
+| base rate | 0.0317 % | | 0.0543 % | |
+| pooled AUC-PR | 0.1206 | 0.0361 | 0.2091 | 0.0609 |
+| pooled ROC-AUC | 0.9302 | 0.9358 | 0.9299 | 0.9355 |
+| days with the higher daily AUC-PR | 99.4 % | | 100 % | |
+| at the best-F2 threshold of 2019: fire caught | 30.5 % | 27.8 % | 39.8 % | 33.3 % |
+| mean share of land flagged per day | 0.071 % | 0.140 % | 0.111 % | 0.191 % |
+| precision | 0.1365 | 0.0630 | 0.1946 | 0.0945 |
+| F2 | 0.2445 | 0.1651 | 0.3294 | 0.2214 |
 
-| | SMOLDER | persistence | source |
-|---|---|---|---|
-| pooled AUC-PR, 2019 (349 issue days) | 0.2091 | 0.0609 | `national_2019.json`, `national_2019_persistence.json`: pooled_auc_pr |
-| pooled ROC-AUC, 2019 | 0.9299 | 0.9355 | same files: pooled_roc_auc |
-| days with the higher daily AUC-PR | 100 % | | `comparison_2019.json` |
-| fire caught at the best-F2 threshold of 2019 | 39.8 % | 33.3 % | `adaptive_budget_2019.json`: adaptive_best.*.f2.recall |
-| mean share of land flagged per day | 0.111 % | 0.191 % | same: mean_share |
-| precision | 0.1946 | 0.0945 | same: precision |
-| F2 | 0.3294 | 0.2214 | same: f2 |
-| test year 2020 | *after the evaluation* | | `results/experiments/smolder/causal_b_50ep_seed123/test_2020/` |
-
-Files of the final model are in `results/experiments/final/causal_b_50ep_seed123/`
-(2019) and `results/experiments/final/persistence_2019/`.
+Files: 2020 in `results/experiments/smolder/causal_b_50ep_seed123/test_2020/`
+and `results/experiments/final/persistence_2020/`; 2019 in
+`results/experiments/final/causal_b_50ep_seed123/` and
+`results/experiments/final/persistence_2019/` (`national_<year>.json`,
+`comparison_<year>.json`, `adaptive_budget_<year>.json`: adaptive_best).
 
 ## Terms used below
 
@@ -224,18 +230,138 @@ persistence in `results/experiments/final/persistence_2019/`.
 
 ### Test year 2020
 
-*Added after the single evaluation of the final model.*
+The final model was evaluated once on 2020, with the thresholds of 2019
+unchanged.
 
-<!-- 2020: national skill, thresholds of 2019 applied to 2020, distance bands,
-budget curves, events -->
+| 2020, 350 issue days | SMOLDER | persistence |
+|---|---|---|
+| pooled AUC-PR | 0.1206 | 0.0361 |
+| mean daily AUC-PR | 0.1127 | 0.0377 |
+| pooled ROC-AUC | 0.9302 | 0.9358 |
+| AUC-PR for new fire (more than 3 px from fire of days D-2 to D) | 0.0058 | 0.0022 |
+| fire caught at 0.5 % of the land | 45.9 % | 39.3 % |
+| new fire caught at 0.5 % of the land | 20.7 % | 8.3 % |
+
+SMOLDER has the higher daily AUC-PR on 348 of 350 days (mean difference
++0.0750, 95 % interval +0.0693 to +0.0807).
+
+![national skill](figures/fig_national_skill.png)
+
+*(a) Lift over a random selection against the share of land flagged, mean
+over the days of 2020. (b) Daily AUC-PR, 7-day running mean.* Skill follows
+the fire seasons: high in the northern dry season and spring, low in late
+summer and autumn, when there is little fire to predict.
+
+| 2020, thresholds of 2019 | SMOLDER best F1 | SMOLDER best F2 | persistence best F1 | persistence best F2 |
+|---|---|---|---|---|
+| mean area flagged per day | 0.028 % | 0.071 % | 0.096 % | 0.140 % |
+| fire caught | 21.0 % | 30.5 % | 23.0 % | 27.8 % |
+| precision | 0.2374 | 0.1365 | 0.0754 | 0.0630 |
+| false alarms per fire pixel caught | 3.2 | 6.3 | 12.3 | 14.9 |
+| F1 | 0.2228 | 0.1885 | 0.1135 | 0.1027 |
+| F2 | 0.2149 | 0.2445 | 0.1629 | 0.1651 |
+
+The thresholds chosen on 2019 flag less land in 2020 (0.071 % against
+0.111 % for SMOLDER) because there was less fire: the flagged area follows
+the fire situation, and its daily size is rank-correlated with the amount of
+fire that followed (0.78). Fire caught and F2 are lower than in 2019 for both
+rankings; SMOLDER's lead over persistence is similar in both years.
+
+![fire caught and false alarms against the area flagged](figures/fig_budget_curves.png)
+
+*(a) Fire caught and (b) false alarms per fire pixel caught against the mean
+daily area flagged, 2020. Solid: the same share of land every day; dashed:
+one threshold for all days. Circles: the thresholds chosen on 2019 (best F2).*
+
+| 2020, best-F2 threshold, fire caught | within 3 km | 3 to 10 km | more than 10 km |
+|---|---|---|---|
+| share of all fire in the band | 38.6 % | 19.8 % | 41.7 % |
+| SMOLDER | 72.0 % | 12.5 % | 0.6 % |
+| persistence | 72.0 % | 0.0 % | 0.0 % |
+
+![fire caught by distance to recent fire](figures/fig_distance_bands.png)
+
+Close to recent fire both rankings catch the same share, but SMOLDER does it
+with half the area; between 3 and 10 km only SMOLDER catches fire; beyond
+10 km, where 41.7 % of the 2020 fire lies, neither does.
+
+**Events.** Fire-active 192 x 192 km windows, chosen automatically, at the
+thresholds of 2019: where SMOLDER improved most on persistence, and where it
+did worst (`event_maps_2020.json`).
+
+![events where SMOLDER works well](figures/fig_events_well_2020.png)
+
+Where SMOLDER works well, all four windows are savanna fires in the north.
+Persistence flags only a 2 km band around the last detections; SMOLDER flags
+the area into which the fire spreads. On 21 November 2020 (17.6 S 144.6 E, 479 fire
+pixels) SMOLDER caught 75.8 % with 290 false alarms, persistence 28.2 % with
+689.
+
+![events where SMOLDER works poorly](figures/fig_events_poorly_2020.png)
+
+Where it works poorly, fire appears far from earlier detections or as many
+small, scattered fires. On 6 February 2020 (33.0 S 119.6 E, 1065 fire pixels)
+the fire was not preceded by detections nearby; SMOLDER caught 0.7 %,
+persistence 3.1 %.
+
+Sources: `results/experiments/smolder/causal_b_50ep_seed123/test_2020/`
+(`national_2020.json`, `comparison_2020.json`, `adaptive_budget_2020.json`,
+`operating_point_2020.json`, `report_derived_2020.json`, `event_maps_2020.json`),
+persistence in `results/experiments/final/persistence_2020/`.
 
 ## What the forecast depends on
 
-*Added with the 2020 evaluation: permutation importance of every input for
-the flagged pixels, conditions of caught, missed and falsely flagged pixels,
-and how burned pixels differed from their unburned neighbours beforehand.*
+To see what the flagged pixels depend on, each input was shuffled across the
+land pixels of a patch (every pixel keeps a realistic time series but loses
+its location), on 1500 fire-active patches of 2020, and two things were
+measured: the share of flagged pixels that are no longer flagged, and the
+relative fall of AUC-PR. The patches were also split into 5 blocks of time and
+5 regions to check that the result holds across season and space
+(`explain_2020_adaptive_f2.json`).
 
-<!-- 2020: fig_explain_importance, fig_explain_conditions, fig_explain_prefire -->
+![input importance](figures/fig_explain_importance.png)
+
+| input | flagged pixels no longer flagged | fall of AUC-PR |
+|---|---|---|
+| fire history | 83.1 % | 52.4 % |
+| fire radiative power | 52.0 % | 28.9 % |
+| NDVI | 15.8 % | 7.1 % |
+| fuel age | 13.3 % | 7.0 % |
+| aspect, slope | 7.8 %, 7.5 % | 0.9 %, 1.3 % |
+| vapour pressure deficit | 7.0 % | 0.3 % |
+| downwind alignment | 5.6 % | 1.2 % |
+| biomass, leaf area index | 5.0 %, 4.7 % | 1.0 %, 1.2 % |
+| wind direction, wind speed | 3.6 %, 1.6 % | 0.5 %, 0.05 % |
+| land cover, climate zone | 2.9 %, 2.2 % | 0.2 %, below 0 |
+| maximum air temperature, soil moisture | 2.8 %, 2.7 % | 0.8 %, below 0 |
+| elevation, precipitation | 1.0 %, 0.9 % | 0.1 %, below 0 |
+
+The fire inputs decide the selection: fire history and fire radiative power
+by far, then fuel age, which is also built from the fire record. Of the
+weather and vegetation inputs, only NDVI moves the ranking noticeably. This is
+the same picture as the distance bands: the model's skill is about where
+existing fire goes next.
+
+![conditions by forecast outcome](figures/fig_explain_conditions.png)
+
+*(a) Where the outcomes lie: 87.0 % of the caught fire pixels and 78.2 % of
+the false alarms are within 3 km of recent fire, while 59.6 % of the missed
+fire is more than 10 km away. (b to e) Conditions on the issue day by
+outcome and climate zone (median and middle half).* Within a climate zone,
+caught pixels are drier than other land: in the temperate zone soil moisture
+0.337 against 0.549 and vapour pressure deficit 2.31 against 1.42 kPa
+(`explain_figures_numbers.json`).
+
+![what precedes fire](figures/fig_explain_prefire.png)
+
+*Pixels that burned minus pixels of the same patch and day that did not,
+over the model's look-back window (95 % interval over patches).* Burned
+pixels had wetter soil (+0.021 about 100 days before) and more rain three to
+four months before, carried more leaf area throughout (+0.15 to +0.17), and
+had slightly lower vapour pressure deficit; by the last 8-day period the
+difference in soil moisture and rain has gone. This fits fuel that grew
+after a wet period and dried out before the fire. The signal is real but
+small next to the effect of fire burning nearby.
 
 ## Keeping later information out of the inputs
 

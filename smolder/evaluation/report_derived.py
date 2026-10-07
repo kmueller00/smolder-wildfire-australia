@@ -8,7 +8,8 @@ For YEAR (default 2019) and the run RUN (default the final model):
                    band and the share of all fire per band (operating_point_<YEAR>.json,
                    bands.fire_share)
   ratios           SMOLDER over persistence: pooled AUC-PR (national_<YEAR>.json and the
-                   persistence file) and precision at the best-F2 thresholds
+                   persistence file), precision and flagged area at the best-F2 thresholds;
+                   pooled AUC-PR over the base rate of the year, for both
   common_days      (YEAR=2019 only) daily AUC-PR of the final model and of model B
                    (earlier inputs) on the issue days both were evaluated on: mean of
                    each, share of days on which the final model is higher
@@ -51,7 +52,11 @@ def main():
     S = json.load(open(os.path.join(RUN_DIR, f"national_{YEAR}.json")))
     P = json.load(open(PERSIST))
     out["ratios"] = dict(pooled_auc_pr=S["pooled_auc_pr"] / P["pooled_auc_pr"],
-                         precision_f2=ab["SMOLDER"]["f2"]["precision"] / ab["persistence"]["f2"]["precision"])
+                         precision_f2=ab["SMOLDER"]["f2"]["precision"] / ab["persistence"]["f2"]["precision"],
+                         auc_pr_over_base_rate_SMOLDER=S["pooled_auc_pr"] / S["base_rate"],
+                         auc_pr_over_base_rate_persistence=P["pooled_auc_pr"] / P["base_rate"],
+                         area_f2_SMOLDER_over_persistence=ab["SMOLDER"]["f2"]["mean_share"]
+                         / ab["persistence"]["f2"]["mean_share"])
     if YEAR == 2019 and os.path.exists(MODEL_B):
         a = pd.read_csv(os.path.join(RUN_DIR, f"national_{YEAR}_daily.csv"))[["date", "auc_pr"]]
         b = pd.read_csv(MODEL_B)[["date", "auc_pr"]]

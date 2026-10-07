@@ -52,7 +52,10 @@
  },
  "ratios": {
   "pooled_auc_pr": 3.4334888400523473,
-  "precision_f2": 2.058314241597751
+  "precision_f2": 2.058314241597751,
+  "auc_pr_over_base_rate_SMOLDER": 385.00876480596065,
+  "auc_pr_over_base_rate_persistence": 112.13339630371152,
+  "area_f2_SMOLDER_over_persistence": 0.5812255700963193
  },
  "common_days": {
   "n_days": 349,

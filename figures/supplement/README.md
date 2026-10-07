@@ -1,10 +1,10 @@
 # Supplementary figures
 
-Figures that accompany the paper but are not part of it. The five result
-figures (`fig_*`) currently show the provisional model B (results in
-`results/experiments/smolder/full_model_windalign_seed123/`); they will be
-replaced by the final model's versions under the same file names. The maps of
-the input data (`map_*`) describe the data and do not depend on the model.
+Figures that accompany the paper but are not part of it. The result figures
+(`fig_*`) show the final model (results in
+`results/experiments/smolder/causal_b_50ep_seed123/test_2020/` and
+`results/experiments/final/causal_b_50ep_seed123/`). The maps of the input
+data (`map_*`) describe the data and do not depend on the model.
 Scripts: `figures/make_national_figures.py`, `make_gt_vs_pred.py`,
 `make_convergence_figure.py`, `make_explain_figures.py`, `make_input_maps.py`.
 

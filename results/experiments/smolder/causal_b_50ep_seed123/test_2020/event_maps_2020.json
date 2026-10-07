@@ -1,0 +1,105 @@
+{
+ "flagging": "best-f2 thresholds of /home/saturn/gwgi/gwgi107h/wildfire_data/firecastnet-australia/results/experiments/final/causal_b_50ep_seed123/adaptive_budget_2019.json",
+ "thresholds": {
+  "persistence": -1.0983749999999999,
+  "full": 0.3230000000000004
+ },
+ "events": {
+  "well 1": {
+   "date": "2020-11-21",
+   "fire_px": 479,
+   "persistence": {
+    "caught": 0.2818371607515658,
+    "false_alarms": 689
+   },
+   "full": {
+    "caught": 0.7578288100208769,
+    "false_alarms": 290
+   }
+  },
+  "well 2": {
+   "date": "2020-11-15",
+   "fire_px": 443,
+   "persistence": {
+    "caught": 0.2595936794582393,
+    "false_alarms": 324
+   },
+   "full": {
+    "caught": 0.7923250564334086,
+    "false_alarms": 811
+   }
+  },
+  "well 3": {
+   "date": "2020-08-28",
+   "fire_px": 432,
+   "persistence": {
+    "caught": 0.4074074074074074,
+    "false_alarms": 927
+   },
+   "full": {
+    "caught": 0.8379629629629629,
+    "false_alarms": 969
+   }
+  },
+  "well 4": {
+   "date": "2020-07-15",
+   "fire_px": 422,
+   "persistence": {
+    "caught": 0.46919431279620855,
+    "false_alarms": 730
+   },
+   "full": {
+    "caught": 0.9312796208530806,
+    "false_alarms": 966
+   }
+  },
+  "poorly 1": {
+   "date": "2020-06-02",
+   "fire_px": 1504,
+   "persistence": {
+    "caught": 0.18085106382978725,
+    "false_alarms": 2092
+   },
+   "full": {
+    "caught": 0.24468085106382978,
+    "false_alarms": 1846
+   }
+  },
+  "poorly 2": {
+   "date": "2020-07-27",
+   "fire_px": 1366,
+   "persistence": {
+    "caught": 0.1273792093704246,
+    "false_alarms": 1406
+   },
+   "full": {
+    "caught": 0.1259150805270864,
+    "false_alarms": 1078
+   }
+  },
+  "poorly 3": {
+   "date": "2020-02-06",
+   "fire_px": 1065,
+   "persistence": {
+    "caught": 0.030985915492957747,
+    "false_alarms": 69
+   },
+   "full": {
+    "caught": 0.006572769953051643,
+    "false_alarms": 29
+   }
+  },
+  "poorly 4": {
+   "date": "2020-05-09",
+   "fire_px": 983,
+   "persistence": {
+    "caught": 0.13835198372329605,
+    "false_alarms": 2453
+   },
+   "full": {
+    "caught": 0.12004069175991862,
+    "false_alarms": 1105
+   }
+  }
+ }
+}

@@ -135,7 +135,7 @@ def distance_bands():
     for j, (lab, col, src) in enumerate(bars):
         v = [100 * src[f"recall {b}"] for b in bands]; xx = x + (j - 0.5) * w
         ax.bar(xx, v, w * 0.9, color=col, zorder=3,
-               label=f"{lab} (flags {100 * src['mean_share']:.2f} % of the land per day on average)")
+               label=f"{lab} (flags {100 * src['mean_share']:.3f} % of the land per day on average)")
         for xi, vi in zip(xx, v):
             ax.text(xi, vi + 1.2, f"{vi:.1f}" if vi < 10 else f"{vi:.0f}", ha="center", va="bottom", fontsize=6, color=INK)
     ax.set_xticks(x)

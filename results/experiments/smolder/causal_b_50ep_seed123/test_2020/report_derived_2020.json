@@ -1,0 +1,60 @@
+{
+ "year": 2020,
+ "run_dir": "results/experiments/smolder/causal_b_50ep_seed123/test_2020",
+ "sources": {
+  "adaptive": "adaptive_budget_2020.json: adaptive_best",
+  "bands": "operating_point_2020.json: bands.fire_share",
+  "national": "national_2020.json",
+  "persistence": "national_2020_persistence.json"
+ },
+ "fire_share_by_band": {
+  "0-3 km": 0.38554944968512234,
+  "3-10 km": 0.19783937831984857,
+  "> 10 km": 0.41661117199502906
+ },
+ "caught_by_band": {
+  "SMOLDER.f1": {
+   "recall": 0.20993372100949614,
+   "recall_from_bands": 0.20993372100949612,
+   "share_of_caught": {
+    "0-3 km": 0.9532548627806051,
+    "3-10 km": 0.044191201723438135,
+    "> 10 km": 0.0025539354959567893
+   }
+  },
+  "SMOLDER.f2": {
+   "recall": 0.3047457120534427,
+   "recall_from_bands": 0.30474571205344264,
+   "share_of_caught": {
+    "0-3 km": 0.911176017653815,
+    "3-10 km": 0.08126174877726686,
+    "> 10 km": 0.007562233568918274
+   }
+  },
+  "persistence.f1": {
+   "recall": 0.22960767451981814,
+   "recall_from_bands": 0.22960767451981814,
+   "share_of_caught": {
+    "0-3 km": 1.0,
+    "3-10 km": 0.0,
+    "> 10 km": 0.0
+   }
+  },
+  "persistence.f2": {
+   "recall": 0.27765469904409334,
+   "recall_from_bands": 0.27765469904409334,
+   "share_of_caught": {
+    "0-3 km": 1.0,
+    "3-10 km": 0.0,
+    "> 10 km": 0.0
+   }
+  }
+ },
+ "ratios": {
+  "pooled_auc_pr": 3.3386501525922814,
+  "precision_f2": 2.166711165232691,
+  "auc_pr_over_base_rate_SMOLDER": 380.9113314459359,
+  "auc_pr_over_base_rate_persistence": 114.09141839859407,
+  "area_f2_SMOLDER_over_persistence": 0.5065607712214675
+ }
+}
