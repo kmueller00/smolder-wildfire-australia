@@ -26,7 +26,7 @@ from smolder.data.io import daily_cube, open_zarr_root
 from smolder.data.zarr_dual_datamodule import check_checkpoint_inputs, DualWindowDataset, DualPatchConfig
 from smolder.models.conv_lstm_lit_dual import ConvLSTMLitDual
 
-CKPT=os.environ.get("CKPT","checkpoints/smolder_swa.ckpt")
+CKPT=os.environ.get("CKPT","checkpoints/smolder_causal_swa.ckpt")
 N_PATCH=int(os.environ.get("N_PATCH",1500))
 # Evaluate at the CHECKPOINT'S OWN training patch size -- the fire-history
 # distance-transform feature is window-size-sensitive (confirmed: it's why

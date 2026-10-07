@@ -60,7 +60,7 @@ from smolder.data.io import daily_cube, open_zarr_root
 from smolder.data.zarr_dual_datamodule import check_checkpoint_inputs, DualPatchConfig, DualWindowDataset
 from smolder.models.conv_lstm_lit_dual import ConvLSTMLitDual
 
-CKPT = os.environ.get("CKPT", "checkpoints/smolder_swa.ckpt")
+CKPT = os.environ.get("CKPT", "checkpoints/smolder_causal_swa.ckpt")
 EVAL_YEAR = int(os.environ.get("EVAL_YEAR", 2020))
 CALIB_YEAR = os.environ.get("CALIB_YEAR", "")
 CALIB_STRIDE = int(os.environ.get("CALIB_STRIDE", 5))

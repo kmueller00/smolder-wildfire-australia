@@ -63,7 +63,7 @@ def compute():
     from smolder.data.zarr_dual_datamodule import DualPatchConfig, DualWindowDataset
     from smolder.models.conv_lstm_lit_dual import ConvLSTMLitDual
 
-    ckpt = os.environ.get("CKPT", os.path.join(os.path.dirname(HERE), "checkpoints", "smolder_swa.ckpt"))
+    ckpt = os.environ.get("CKPT", os.path.join(os.path.dirname(HERE), "checkpoints", "smolder_causal_swa.ckpt"))
     cube = daily_cube(2020)
     times = list(open_zarr_root(cube).attrs.get("time", []))
     from smolder.data.zarr_dual_datamodule import check_checkpoint_inputs

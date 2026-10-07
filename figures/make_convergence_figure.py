@@ -30,7 +30,7 @@ axA.legend(fontsize=9, loc="upper right", frameon=True, facecolor="white", edgec
 axB.plot(C.epoch, C.val_ap, "-", color=ACCENT, lw=2.0, zorder=4, label="validation AP (2019)")
 swa = C[C.in_swa == 1]
 axB.scatter(swa.epoch, swa.val_ap, s=90, facecolor=ACCENT2, edgecolor="white", linewidth=1.3,
-            zorder=5, label="averaged into the released model")
+            zorder=5, label="averaged into the model")
 axB.set_ylim(0, np.ceil(C.val_ap.max() * 20) / 20 + 0.05)
 axB.set_yticks(np.arange(0, axB.get_ylim()[1] + 1e-9, 0.05))
 axB.set_ylabel("Average precision", fontsize=10.5, fontweight="bold", color=INK)
@@ -39,7 +39,7 @@ axB.legend(fontsize=9, loc="lower right", frameon=True, facecolor="white", edgec
 
 for ax in (axA, axB):
     ax.set_xlim(-0.5, xmax + 0.5)
-    ax.set_xticks(np.arange(0, xmax + 1, 2))
+    ax.set_xticks(np.arange(0, xmax + 1, 2 if xmax <= 30 else 5))
     ax.set_xlabel("Training epoch", fontsize=10.5, fontweight="bold", color=INK)
     style_axes(ax)
 

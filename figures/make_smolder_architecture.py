@@ -93,7 +93,7 @@ def extract():
     steps = list(range(D - 13, D + 1))
     out["target"] = np.stack([_block((((g["y_fire_3d"][s][sl] > 0) & land)).astype(np.float32), "max")
                               for s in steps]).astype(np.float16)
-    ckpt = os.environ.get("CKPT", os.path.join(os.path.dirname(HERE), "checkpoints", "smolder_swa.ckpt"))
+    ckpt = os.environ.get("CKPT", os.path.join(os.path.dirname(HERE), "checkpoints", "smolder_causal_swa.ckpt"))
     out["has_pred"] = False
     if os.path.exists(ckpt):
         import torch

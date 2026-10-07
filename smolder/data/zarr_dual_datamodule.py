@@ -160,7 +160,7 @@ class DualPatchConfig:
     # Slow-branch window. Fixed (default): only 8-day bins that END on or
     # before the issue day D = t_end - 1 are used, so the newest bin is 0-7
     # days old. Legacy: every bin that STARTS on or before t_end, the
-    # behaviour the released checkpoint (smolder_swa.ckpt) was trained with;
+    # behaviour the first released checkpoint (smolder_v1_swa.ckpt) was trained with;
     # its newest bin always reaches past D, by 1-8 days and over the whole
     # target window on 75 % of issue days (results/slow_window_leak_check_2019.json).
     # Set SLOW_WINDOW_LEGACY=1 only to reproduce that checkpoint's results.
