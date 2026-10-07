@@ -264,8 +264,13 @@ summer and autumn, when there is little fire to predict.
 The thresholds chosen on 2019 flag less land in 2020 (0.071 % against
 0.111 % for SMOLDER) because there was less fire: the flagged area follows
 the fire situation, and its daily size is rank-correlated with the amount of
-fire that followed (0.78). Fire caught and F2 are lower than in 2019 for both
-rankings; SMOLDER's lead over persistence is similar in both years.
+fire that followed (0.78). The threshold is close to the best possible on
+2020: no threshold would have reached an F2 above 0.2447 (0.2445 at the 2019
+threshold). Fire caught is lower than in 2019 for both rankings (SMOLDER 30.5
+against 39.8 %), mainly because more of the 2020 fire lay more than 10 km from
+earlier fire (41.7 against 32.6 %), which no ranking catches; this accounts for
+about 6 of the 9.4 points, lower catch rates near fire for the rest
+(`report_derived_2020.json`: f2_hindsight, decline_from_2019).
 
 ![fire caught and false alarms against the area flagged](figures/fig_budget_curves.png)
 

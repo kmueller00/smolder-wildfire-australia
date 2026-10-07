@@ -13,6 +13,9 @@ For YEAR (default 2019) and the run RUN (default the final model):
   f2_hindsight     the best F2 on the year's threshold sweep (adaptive_curve) against the
                    F2 at the threshold used; a diagnostic of how well the 2019 threshold
                    transfers, not a choice
+  decline_from_2019 (YEAR=2020 only) fire caught at the best-F2 threshold, 2019 against
+                   2020, split into the change of the mix of near and far fire and the
+                   change of the catch rates per distance band (existing 2019 files only)
   common_days      (YEAR=2019 only) daily AUC-PR of the final model and of model B
                    (earlier inputs) on the issue days both were evaluated on: mean of
                    each, share of days on which the final model is higher
@@ -69,6 +72,29 @@ def main():
         f2 = 5 * pre * rec / np.maximum(4 * pre + rec, 1e-12); i = int(np.nanargmax(f2))
         out["f2_hindsight"][name] = dict(f2_best_on_sweep=float(f2[i]), mean_share_there=float(curve[name]["mean_share"][i]),
                                         f2_at_threshold_used=ab[name]["f2"]["f2"])
+    if YEAR == 2020:                    # why fire caught at the best-F2 threshold differs from 2019
+        R19 = os.path.join(RES, "final", "causal_b_50ep_seed123")
+        ab19 = json.load(open(os.path.join(R19, "adaptive_budget_2019.json")))["adaptive_best"]
+        sh19 = np.array(json.load(open(os.path.join(R19, "operating_point_2019.json")))["bands"]["fire_share"])
+        sh20 = np.array(share)
+        out["decline_from_2019"] = dict(
+            note="fire caught = sum over distance bands of (catch rate in the band x share of fire in the "
+                 "band); the change from 2019 is split into the change of the shares (mix of near and far "
+                 "fire) and the change of the catch rates. The split depends on the order, so both orders "
+                 "are given. Uses the existing 2019 result files only.",
+            fire_share_2019=dict(zip(BANDS, sh19.tolist())), fire_share_2020=dict(zip(BANDS, sh20.tolist())))
+        for name in ("SMOLDER", "persistence"):
+            r19 = np.array([ab19[name]["f2"][f"recall {b}"] for b in BANDS])
+            r20 = np.array([ab[name]["f2"][f"recall {b}"] for b in BANDS])
+            c19, c20 = float(r19 @ sh19), float(r20 @ sh20)
+            rates20_mix19, rates19_mix20 = float(r20 @ sh19), float(r19 @ sh20)
+            out["decline_from_2019"][name] = dict(
+                recall_2019=c19, recall_2020=c20, change=c20 - c19,
+                rates_2019=dict(zip(BANDS, r19.tolist())), rates_2020=dict(zip(BANDS, r20.tolist())),
+                recall_with_2020_rates_and_2019_mix=rates20_mix19,
+                recall_with_2019_rates_and_2020_mix=rates19_mix20,
+                mix_effect=dict(rates_changed_first=c20 - rates20_mix19, mix_changed_first=rates19_mix20 - c19),
+                rate_effect=dict(rates_changed_first=rates20_mix19 - c19, mix_changed_first=c20 - rates19_mix20))
     if YEAR == 2019 and os.path.exists(MODEL_B):
         a = pd.read_csv(os.path.join(RUN_DIR, f"national_{YEAR}_daily.csv"))[["date", "auc_pr"]]
         b = pd.read_csv(MODEL_B)[["date", "auc_pr"]]
