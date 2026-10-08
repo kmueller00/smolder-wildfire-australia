@@ -211,18 +211,20 @@ def events():
     """Event maps: per event two panels, persistence and SMOLDER, each flagging at its
     best-F2 threshold of 2019. Warm colours are fire, the cool colour is the flagged
     area: fire of the next 3 days dark red inside the flagged area (caught) and orange
-    outside it (missed); fire of the previous 3 days as a dark outline on top."""
+    outside it (missed); fire of the previous 3 days dark grey, beneath the fire of the
+    next 3 days so that it never hides it."""
     year = int(os.environ.get("YEAR", 2020)); z = np.load(os.environ["EVENT_CACHE"])
-    OCEAN, LAND, FLAG, CAUGHT, MISSED = "#FFFFFF", "#ECECEE", "#BCD4EA", "#9E2A2B", "#EE9B3B"
-    PREV, COAST = "#2E2E33", "#8A8A90"
-    cmap = ListedColormap([OCEAN, LAND, FLAG, CAUGHT, MISSED]); S = 192
+    OCEAN, LAND, FLAG, PREV, CAUGHT, MISSED = "#FFFFFF", "#ECECEE", "#BCD4EA", "#505055", "#9E2A2B", "#EE9B3B"
+    COAST = "#8A8A90"
+    cmap = ListedColormap([OCEAN, LAND, FLAG, PREV, CAUGHT, MISSED]); S = 192
     LON0, LAT0, PX = 112.904998779, -9.005000113999998, 0.01
 
-    def rgb(land, y, flag):
+    def rgb(land, recent, y, flag):
         c = np.where(land, 1, 0)
-        c = np.where(flag & ~y, 2, c)
-        c = np.where(flag & y, 3, c)
-        return np.where(~flag & y, 4, c)
+        c = np.where(flag & ~y, 2, c)                  # flagged, no fire
+        c = np.where(recent & ~y, 3, c)                # previous fire (beneath the next 3 days)
+        c = np.where(flag & y, 4, c)                   # next 3 days, flagged
+        return np.where(~flag & y, 5, c)               # next 3 days, not flagged
 
     for kind in ("well", "poorly"):
         n = sum(1 for k in z.files if k.startswith(kind) and k.endswith("_meta"))
@@ -238,10 +240,8 @@ def events():
             for j, (c, title) in enumerate((("persistence", "Persistence"), ("full", "SMOLDER"))):
                 ax = fig.add_axes([x_ev[col] + j * (pw + gap), y_row[row], pw, ph])
                 flag = z[p + c]
-                ax.imshow(rgb(land, y, flag), cmap=cmap, vmin=-0.5, vmax=4.5, interpolation="nearest")
+                ax.imshow(rgb(land, recent, y, flag), cmap=cmap, vmin=-0.5, vmax=5.5, interpolation="nearest")
                 ax.contour(land.astype(float), levels=[0.5], colors=COAST, linewidths=0.5)
-                if recent.any():
-                    ax.contour(recent.astype(float), levels=[0.5], colors=PREV, linewidths=0.45)
                 ax.set_xticks([]); ax.set_yticks([])
                 for sp in ax.spines.values():
                     sp.set_color("#9A9AA0"); sp.set_linewidth(0.5)
@@ -251,7 +251,7 @@ def events():
                 if j == 0:
                     ax.plot([8, 58], [S - 10, S - 10], color=INK, lw=1.0)
                     ax.text(33, S - 14, "50 km", ha="center", va="bottom", fontsize=6, color=INK)
-        handles = [Patch(facecolor="none", edgecolor=PREV, lw=0.8, label="fire on the previous 3 days"),
+        handles = [Patch(color=PREV, label="fire on the previous 3 days"),
                    Patch(color=CAUGHT, label="fire in the next 3 days, flagged"),
                    Patch(color=MISSED, label="fire in the next 3 days, not flagged"),
                    Patch(color=FLAG, label="flagged, no fire"),
