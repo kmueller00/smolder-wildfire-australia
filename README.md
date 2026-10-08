@@ -198,10 +198,13 @@ the final model.
 SMOLDER has the higher daily AUC-PR on all 349 days (mean difference +0.1212,
 95 % interval +0.1153 to +0.1273). To catch as much fire as persistence does
 with 0.5 % of the land, it needs 0.246 % (54 % fewer false alarms).
-Persistence has the slightly higher ROC-AUC. ROC-AUC weighs the ranking of
-the large mass of pixels far from any fire, where distance to fire is a
-smooth, sensible order; AUC-PR weighs the few top-ranked pixels, which matter
-for a warning.
+Persistence has the slightly higher ROC-AUC. In 2020 the gap (0.0058) comes
+from fire 10 to 25 km from earlier fire: persistence ranks it above all land
+further away by construction, while SMOLDER's proximity input exp(-d/5 km)
+has faded there; within each distance band up to 25 km SMOLDER orders the
+land better (ROC-AUC 0.86 against 0.70 within 3 km;
+`test_2020/roc_by_distance_2020.json`). AUC-PR weighs the few top-ranked
+pixels, which matter for a warning.
 
 | 2019, thresholds | SMOLDER best F1 | SMOLDER best F2 | persistence best F1 | persistence best F2 |
 |---|---|---|---|---|

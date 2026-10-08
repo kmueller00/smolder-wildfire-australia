@@ -4,7 +4,7 @@ no text below 6 pt, no title above the panels (the caption says it).
   fig_national_skill.png        2.4 in  (a) lift against the share of land flagged, SMOLDER and
                                         persistence; (b) daily AUC-PR of both, 7-day running means
   fig_budget_curves.png         2.8 in  fire caught and false alarms per hit against the area flagged
-  fig_distance_bands.png        2.4 in  fire caught by distance to recent fire, 2019 best-F2 thresholds
+  fig_distance_bands.png        3.35 x 2.4 in (one column)  fire caught by distance to recent fire in fine bands, 2019 best-F2 thresholds
   fig_explain_importance.png    3.0 in  (a) both importance measures per input, (b, c) displaced
                                         share by land cover and climate zone
   fig_events_well_<Y>.png       3.4 in  four events, 2 x 2 layout, three panels each
@@ -54,7 +54,7 @@ def style_axes(ax, **kw):
 
 
 def save(fig, name, h):
-    fig.set_size_inches(W, h)
+    fig.set_size_inches(fig.get_size_inches()[0], h)          # full width (6.93 in) or one column (3.35 in)
     fig.savefig(os.path.join(FIG_OUT, name), dpi=DPI, facecolor="white")
     plt.close(fig)
     print("wrote", name, flush=True)
@@ -137,28 +137,32 @@ def budget_curves():
 
 
 def distance_bands():
-    """Fire caught by distance to the nearest fire of days D-2..D in fine bands, at the
-    best-F2 thresholds of 2019 (fine_bands_area_2020.json, smolder.evaluation.fine_bands_area)."""
+    """One-column figure (3.35 in): fire caught by distance to the nearest fire of days
+    D-2..D in fine bands, at the best-F2 thresholds of 2019 (fine_bands_area_2020.json,
+    smolder.evaluation.fine_bands_area). Horizontal bars, bands from near (top) to far."""
     F = json.load(open(os.path.join(RUN, "fine_bands_area_2020.json")))
     fb = F["fine_bands"]; share = fb["fire_share"]
-    labels = ["0 km\n(burned\nitself)", "up to\n1 km", "1 to\n2 km", "2 to\n3 km", "3 to\n5 km", "5 to\n10 km",
-              "10 to\n25 km", "more than\n25 km"]
+    labels = ["0 km (burned itself)", "up to 1 km", "1 to 2 km", "2 to 3 km", "3 to 5 km", "5 to 10 km",
+              "10 to 25 km", "more than 25 km"]
     bars = [("Persistence", GREY, fb["persistence"]), ("SMOLDER", ACCENT, fb["SMOLDER"])]
-    fig = plt.figure(figsize=(W, 2.4)); ax = fig.add_axes([0.075, 0.27, 0.9, 0.69])
-    x = np.arange(len(labels)); w = 0.36
+    WC = 3.35
+    fig = plt.figure(figsize=(WC, 2.4)); ax = fig.add_axes([0.355, 0.15, 0.615, 0.7])
+    y = np.arange(len(labels))[::-1]; h = 0.38
     for j, (lab, col, src) in enumerate(bars):
-        v = [100 * r for r in src["recall"]]; xx = x + (j - 0.5) * w
-        ax.bar(xx, v, w * 0.9, color=col, zorder=3,
-               label=f"{lab} (flags {100 * src['mean_share_flagged']:.3f} % of the land per day on average)")
-        for xi, vi in zip(xx, v):
-            ax.text(xi, vi + 1.2, f"{vi:.1f}" if vi < 10 else f"{vi:.0f}", ha="center", va="bottom", fontsize=6, color=INK)
-    ax.set_xticks(x)
-    ax.set_xticklabels([f"{l}\n({100 * s_:.1f} % of fire)" for l, s_ in zip(labels, share)], fontsize=6,
-                       linespacing=0.95)
-    ax.set_xlabel("Distance to the nearest fire detected on the issue day or the two days before", labelpad=2)
-    ax.set_ylabel("Fire caught (%)"); ax.set_ylim(0, 105)
-    style_axes(ax, grid_x=False)
-    ax.legend(loc="upper right", frameon=True, facecolor="white", edgecolor="#C8C8CC")
+        v = np.array([100 * r for r in src["recall"]]); yy = y + (0.5 - j) * h
+        ax.barh(yy, v, h * 0.9, color=col, zorder=3,
+                label=f"{lab} ({100 * src['mean_share_flagged']:.3f} % of land per day)")
+        for yi, vi in zip(yy, v):
+            if vi > 0:                                         # persistence catches nothing beyond 2 km
+                ax.text(vi + 1.5, yi, f"{vi:.1f}" if vi < 10 else f"{vi:.0f}", ha="left", va="center",
+                        fontsize=6, color=INK)
+    ax.set_yticks(y)
+    ax.set_yticklabels([f"{l} ({100 * s_:.1f} %)" for l, s_ in zip(labels, share)], fontsize=6)
+    ax.set_xlim(0, 112); ax.set_xticks([0, 25, 50, 75, 100])
+    ax.set_xlabel("Fire caught (%)", labelpad=1)
+    style_axes(ax, grid_y=False)
+    ax.legend(loc="lower left", bbox_to_anchor=(-0.55, 1.01), ncol=1, frameon=False, fontsize=6,
+              handlelength=1.0, borderaxespad=0)
     save(fig, "fig_distance_bands.png", 2.4)
 
 

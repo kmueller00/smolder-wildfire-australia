@@ -126,6 +126,32 @@ def extract():
     print("wrote", CACHE, "patch", y0, x0, "prediction" if out["has_pred"] else "target only")
 
 
+def from_scores():
+    """The output map of the issue day from the STORED national scores of a run
+    (SCORES, written by evaluate_national; the model is not run), for the patch of
+    BASE_CACHE: percentile within the patch's land, as in extract(). Writes CACHE with
+    the land mask, the channel counts and the date of BASE_CACHE and pred = one map."""
+    from scipy.stats import rankdata
+    sys.path.insert(0, os.path.dirname(HERE))
+    from smolder.data.io import daily_cube, open_zarr_root
+    base = np.load(os.environ["BASE_CACHE"])
+    y0, x0 = int(base["y0"]), int(base["x0"])
+    lm = open_zarr_root(daily_cube(2020))["landmask"][:] > 0
+    days = [int(v) for v in np.load(os.environ["SCORES"] + ".days.npy")]
+    full = np.full(lm.shape, np.nan, np.float32)
+    full[lm] = np.load(os.environ["SCORES"], mmap_mode="r")[days.index(ISSUE_DAY)]
+    p = full[y0:y0 + PATCH, x0:x0 + PATCH]
+    land = lm[y0:y0 + PATCH, x0:x0 + PATCH]
+    r = np.full(p.shape, np.nan, np.float32)
+    r[land] = 100 * (rankdata(p[land]) - 1) / max(land.sum() - 1, 1)
+    out = {k: base[k] for k in base.files if k not in ("pred",)}
+    out["pred"] = _block(r, "mean")[None].astype(np.float16)
+    out["has_pred"] = True
+    out["pred_source"] = np.array(os.path.basename(os.environ["SCORES"]))
+    np.savez_compressed(CACHE, **out)
+    print("wrote", CACHE, "from", os.environ["SCORES"], "day", ISSUE_DAY, "patch", y0, x0)
+
+
 # ----------------------------------------------------------------- drawing
 FRAME_EC = "#2B2B2E"
 LINE = "#3A3A3E"
@@ -154,9 +180,12 @@ COAST = "#1F1F22"
 LAND = None                     # set in draw(): land mask at thumbnail resolution
 
 
-def coast(ax, x, y, size, z):
-    ax.contour(LAND.astype(float), levels=[0.5], colors=COAST, linewidths=0.7, zorder=z,
-               extent=[x, x + size, y + size, y], origin="upper")
+def coast(ax, x, y, size, z, height=None):
+    """Coastline of the patch on a map drawn with imshow(extent=[x, x+size, y, y+h], origin="upper").
+    The extent must be given bottom to top as for imshow; the earlier (y + size, y) flipped it."""
+    h = size if height is None else height
+    ax.contour(LAND.astype(float), levels=[0.5], colors=COAST, linewidths=0.8, zorder=z,
+               extent=[x, x + size, y, y + h], origin="upper")
 
 
 def stack(ax, frames, x, y, size, cmap, vmin, vmax, dx=None, dy=None, z0=3):
@@ -231,7 +260,8 @@ def draw():
         rect(ax, x, 8, w, 72, lw=1.3, z=0)
         ax.text(x + 1.2, 78.6, f"({tag})  {title}", fontsize=F(11.5), fontweight="bold",
                 color=INK, va="top", ha="left")
-    ax.text(1.0, 78.6, "Inputs", fontsize=F(11.5), fontweight="bold", color=INK, va="top", ha="left")
+    rect(ax, 0.3, 8, 21.6, 72, lw=1.3, z=0)                     # frame of the inputs column
+    ax.text(1.2, 78.6, "Inputs", fontsize=F(11.5), fontweight="bold", color=INK, va="top", ha="left")
 
     # ---- inputs and (a) unrolled ConvLSTM chains
     xs = [27.0, 38.8, 50.6]
@@ -240,10 +270,10 @@ def draw():
               (30.0, ACCENT2, "Fast-branch input", f"(14, 384, 384, {cf})", "14 daily steps",
                "14 steps, 5 × 5 kernels, 64 channels"))
     for yc, col, name, shape, sub, steps in chains:
-        box(ax, 1.0, yc - 17.0, 20.0, 13.0, col, [(name, 8.8, True, col), (shape, 8.6, False, INK),
+        box(ax, 1.1, yc - 17.0, 20.0, 13.0, col, [(name, 8.8, True, col), (shape, 8.6, False, INK),
                                                   (sub, 7.6, False, INK)])
         feed = yc - 10.5
-        ax.plot([21.0, xs[-1] + 4.0], [feed, feed], color=col, lw=1.1, zorder=5)
+        ax.plot([21.1, xs[-1] + 4.0], [feed, feed], color=col, lw=1.1, zorder=5)
         for j, xc in enumerate(xs):
             rect(ax, xc, yc - 4.2, 8.0, 8.4, ec=col, fc="white", lw=1.6, z=3)
             ax.text(xc + 4.0, yc + 0.9, "ConvLSTM", ha="center", va="center", fontsize=F(6.6),
@@ -280,17 +310,25 @@ def draw():
     path(ax, [(58.6, 30.0), (64.0, 30.0), (64.0, 54.0), (bx, 54.0)], ACCENT2)
     ax.text(60.8, 30.8, "fast", ha="center", fontsize=F(8.2), color=ACCENT2, fontweight="bold")
 
-    # ---- (c) output
-    arrow(ax, bx + bw, 25.0, 103.0, 25.0)
+    # ---- (c) output: the risk map of the issue day, in the vertical middle of the panel
     if bool(d["has_pred"]):
-        out = np.asarray(d["pred"], np.float32)
+        m_out = np.asarray(d["pred"], np.float32)[-1]
         cm_out, vmin, vmax, lab = with_bad("YlOrRd"), 0, 100, "Predicted fire risk\n(percentile within patch)"
     else:
-        out = np.where(d["land"][None], np.asarray(d["target"], np.float32), np.nan)
+        m_out = np.where(d["land"], np.asarray(d["target"], np.float32)[-1], np.nan)
         cm_out, vmin, vmax, lab = ListedColormap(["#F2F2F4", "#B2182B"]), 0, 1, "Observed target\n(VIIRS fire)"
-    c = stack(ax, out, 103.5, 20.0, 13.0, cm_out, vmin, vmax)
-    label(ax, c, 18.4, lab, fontsize=F(9.0), fontweight="bold")
-    label(ax, c, 13.0, "Fire on days D+1 to D+3,\none map per fast time step", fontsize=F(8.0))
+    m_out = np.where(LAND, m_out, np.nan)                       # ocean in the 'bad' colour
+    msz, mx = 19.0, 103.0
+    # square on paper: one x unit and one y unit differ in length in the PAPER layout
+    mh = msz * ((6.93 * 0.99 / 126) / (3.2 * 0.98 / 74)) if PAPER else msz
+    my = 44.0 - mh / 2
+    ax.imshow(m_out, extent=[mx, mx + msz, my, my + mh], cmap=cm_out, vmin=vmin, vmax=vmax,
+              interpolation="nearest", zorder=3, origin="upper")
+    rect(ax, mx, my, msz, mh, ec="#555558", lw=0.6, z=4)
+    coast(ax, mx, my, msz, 5, height=mh)
+    path(ax, [(bx + bw, 22.25), (100.9, 22.25), (100.9, 44.0), (mx, 44.0)], LINE)
+    label(ax, mx + msz / 2, my - 1.2, lab, fontsize=F(9.0), fontweight="bold")
+    label(ax, mx + msz / 2, my - 7.4, "Fire on days D+1 to D+3,\nissued on day D", fontsize=F(8.0))
 
     if PAPER:
         ax.set_aspect("auto"); ax.set_xlim(0, 126); ax.set_ylim(7, 81)   # imshow forces equal aspect
@@ -301,4 +339,9 @@ def draw():
 
 
 if __name__ == "__main__":
-    extract() if "--extract" in sys.argv else draw()
+    if "--extract" in sys.argv:
+        extract()
+    elif "--from-scores" in sys.argv:
+        from_scores()
+    else:
+        draw()
