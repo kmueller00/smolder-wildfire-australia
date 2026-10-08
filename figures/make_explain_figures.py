@@ -22,6 +22,7 @@ import sys
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import matplotlib.ticker
 import numpy as np
 from matplotlib.colors import LinearSegmentedColormap
 from style_smolder import ACCENT, ACCENT2, INK, MUTED, PANEL_BG, new_figure, style_axes
@@ -226,6 +227,10 @@ def conditions(pixels):
     return shares, quartiles
 
 
+TRAJ_SIX = [("sm", 18, "Soil moisture index", "slow"), ("ppt", 18, "Rain per 8 days (mm)", "slow"),
+            ("lai", 18, "Leaf area index", "lai"), ("vpd", 14, "Vapour pressure deficit (kPa)", "fast"),
+            ("tmax", 14, "Maximum air temperature (°C)", "fast"), ("ndvi", 14, "NDVI", "ndvi")]
+NDVI_LAG = 7
 TRAJ_PAPER = [("sm", 18, "Soil moisture index", "slow"), ("ppt", 18, "Rain per 8 days (mm)", "slow"),
               ("lai", 18, "Leaf area index", "lai"), ("vpd", 14, "Vapour pressure deficit (kPa)", "fast")]
 LAI_LAG = 31
@@ -332,19 +337,25 @@ def prefire_by_outcome(pixels, n_boot=500):
     rng = np.random.default_rng(0)
     lines = [("hit", "fire SMOLDER caught", "#0E8C6E", "-"), ("miss", "fire SMOLDER missed", "#C2185B", "-"),
              ("false_alarm", "false alarms", "#DB8A0A", (0, (4, 2)))]
-    fig = plt.figure(figsize=(PW, 1.9))
-    x0, wd, gap = 0.075, 0.2, 0.04
+    six = "ndvi_d00" in p.columns and "tmax_d00" in p.columns
+    traj = TRAJ_SIX if six else TRAJ_PAPER
+    fig = plt.figure(figsize=(PW, 3.2 if six else 1.9))
+    x0, wd, gap = (0.08, 0.255, 0.075) if six else (0.075, 0.2, 0.04)
     ctrl = (p.cls == "background").values
     pid = p.patch.values
     out = {}
-    for k, (prefix, n, label, kind) in enumerate(TRAJ_PAPER):
-        cols = [f"{prefix}_{'d' if prefix == 'vpd' else 'b'}{j:02d}" for j in range(n)]
+    for k, (prefix, n, label, kind) in enumerate(traj):
+        cols = [f"{prefix}_{'d' if kind in ('fast', 'ndvi') else 'b'}{j:02d}" for j in range(n)]
         V = p[cols].values
-        if kind == "fast":
-            x = np.arange(-(n - 1), 1)
+        if kind in ("fast", "ndvi"):
+            x = np.arange(-(n - 1), 1) - (NDVI_LAG if kind == "ndvi" else 0)   # NDVI: composite of day - 7
         else:
             x = -(np.arange(n)[::-1] * 8 + 7.5) - (LAI_LAG if kind == "lai" else 0)
-        ax = fig.add_axes([x0 + k * (wd + gap), 0.2, wd, 0.6])
+        if six:
+            r_, c_ = divmod(k, 3)
+            ax = fig.add_axes([x0 + c_ * (wd + gap), 0.585 - r_ * 0.475, wd, 0.3])
+        else:
+            ax = fig.add_axes([x0 + k * (wd + gap), 0.2, wd, 0.6])
         ax.axhline(0, color=INK, lw=0.6, zorder=2)
         for cls, lab, col, ls in lines:
             sel = (p.cls == cls).values
@@ -369,13 +380,17 @@ def prefire_by_outcome(pixels, n_boot=500):
             out.setdefault(prefix, {})[cls] = dict(x=x.tolist(), mean=mean.tolist(), ci95_lo=lo.tolist(),
                                                    ci95_hi=hi.tolist(), n_patches=int(len(D)))
         ax.set_xlim(x[0], x[-1] if kind == "fast" else 0)
-        ax.set_title(f"({'abcd'[k]}) {label}", fontsize=PFS, color=INK, loc="left", pad=3, x=-0.02)
+        ax.set_title(f"({'abcdef'[k]}) {label}", fontsize=PFS, color=INK, loc="left", pad=3, x=-0.02)
         ax.set_xlabel("Days before the issue day", labelpad=1)
-        if k == 0:
+        if kind in ("fast", "ndvi"):
+            ax.xaxis.set_major_locator(matplotlib.ticker.MultipleLocator(5))
+        if k % (3 if six else 4) == 0:
             ax.set_ylabel("Difference to other land", labelpad=1)
         _paper_axes(ax)
     h, l = ax.get_legend_handles_labels()
     fig.legend(h, l, loc="upper center", ncol=3, frameon=False, bbox_to_anchor=(0.5, 1.0), handlelength=2.2)
+    if six:
+        print("drew six panels (NDVI and maximum air temperature included)")
     fig.savefig(os.path.join(FIG_OUT, "fig_explain_prefire.png"), dpi=PDPI, facecolor="white")
     plt.close(fig)
     print("wrote fig_explain_prefire.png (by outcome)")

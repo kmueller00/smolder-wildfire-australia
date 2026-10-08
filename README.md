@@ -218,8 +218,9 @@ for a warning.
 | SMOLDER | 78.5 % | 15.7 % | 0.6 % |
 | persistence | 72.0 % | 0.0 % | 0.0 % |
 
-Persistence flags only pixels within 2 km of recent fire at its best-F2
-threshold, so it cannot catch anything further away. SMOLDER's advantage
+Persistence flags only the pixels that burned on the previous three days and
+their eight neighbours at its best-F2 threshold, so it cannot catch anything
+further away. SMOLDER's advantage
 comes from ranking pixels near fire better and from the 3 to 10 km band;
 beyond 10 km neither ranking has useful skill.
 
@@ -276,7 +277,11 @@ about 6 of the 9.4 points, lower catch rates near fire for the rest
 
 *(a) Fire caught and (b) false alarms per fire pixel caught against the mean
 daily area flagged, 2020. Solid: the same share of land every day; dashed:
-one threshold for all days. Circles: the thresholds chosen on 2019 (best F2).*
+one threshold for all days. Circles: the thresholds chosen on 2019 (best F2).* To
+catch half of the 2020 fire with one threshold, SMOLDER flags 0.468 % of the
+land per day on average and persistence 0.979 %; for three quarters 3.632 %
+and 7.015 % (diamonds). Catching 90 % or more needs a fifth of the land or
+more for both (`fine_bands_area_2020.json`: area_for_recall).
 
 | 2020, best-F2 threshold, fire caught | within 3 km | 3 to 10 km | more than 10 km |
 |---|---|---|---|
@@ -286,7 +291,10 @@ one threshold for all days. Circles: the thresholds chosen on 2019 (best F2).*
 
 ![fire caught by distance to recent fire](figures/fig_distance_bands.png)
 
-Close to recent fire both rankings catch the same share, but SMOLDER does it
+In finer bands (`fine_bands_area_2020.json`), persistence catches all fire
+up to 1 km from recent fire and nothing beyond 2 km; SMOLDER catches somewhat
+less right at the fire (90 % and 79 %) but 45 % at 2 to 3 km and 24 % at 3 to
+5 km. Close to recent fire both rankings catch the same share, but SMOLDER does it
 with half the area; between 3 and 10 km only SMOLDER catches fire; beyond
 10 km, where 41.7 % of the 2020 fire lies, neither does.
 
@@ -297,7 +305,7 @@ did worst (`event_maps_2020.json`).
 ![events where SMOLDER works well](figures/fig_events_well_2020.png)
 
 Where SMOLDER works well, all four windows are savanna fires in the north.
-Persistence flags only a 2 km band around the last detections; SMOLDER flags
+Persistence flags only the last detections and their direct neighbours; SMOLDER flags
 the area into which the fire spreads. On 21 November 2020 (17.6 S 144.6 E, 479 fire
 pixels) SMOLDER caught 75.8 % with 290 false alarms, persistence 28.2 % with
 689.
@@ -359,17 +367,19 @@ than other land: in the temperate zone soil moisture
 ![what precedes fire](figures/fig_explain_prefire.png)
 
 *Fire SMOLDER caught, fire it missed and its false alarms, each minus other
-land of the same patch and day, over the model's look-back window (95 %
-interval over patches; `explain_figures_numbers.json`: prefire_by_outcome).*
-The fire SMOLDER caught burned where the soil had dried out (soil moisture
-0.016 below the surrounding land in the last 8-day average) and the
-vegetation was densest (leaf area index 0.24 above). The fire it missed
-burned on soil that was moister than the surroundings (+0.006) and carried
-less vegetation (+0.12). False alarms lie in between. All burned pixels had
-more rain three to four months before, which fits fuel that grew after a wet
-period. So the model catches fire where the weather and fuel signals point to
-it and, beyond being far from earlier fire, misses fire where these signals
-are weak.
+land of the same patch and day, over the model's look-back window (1500
+fire-active patches, outcomes from the stored national scores at the 2019
+threshold; 95 % interval over patches; `prefire_inputs_2020_numbers.json`).*
+The fire SMOLDER caught burned where the vegetation was greenest and densest
+relative to its surroundings (NDVI +0.068, leaf area index +0.24) and the
+soil had dried out (soil moisture -0.015 in the last 8-day average). The fire
+it missed burned on soil that was moister than the surroundings (+0.006) with
+less vegetation (NDVI +0.041, leaf area index +0.13). False alarms lie in
+between. Air temperature does not separate caught from missed fire. All
+burned pixels had more rain three to four months before, which fits fuel that
+grew after a wet period. So the model catches fire where the fuel signals
+point to it and, beyond being far from earlier fire, misses fire where these
+signals are weak.
 
 ## Keeping later information out of the inputs
 

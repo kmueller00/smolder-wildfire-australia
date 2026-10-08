@@ -3,7 +3,7 @@ no text below 6 pt, no title above the panels (the caption says it).
 
   fig_national_skill.png        2.4 in  (a) lift against the share of land flagged, SMOLDER and
                                         persistence; (b) daily AUC-PR of both, 7-day running means
-  fig_budget_curves.png         2.6 in  fire caught and false alarms per hit against the area flagged
+  fig_budget_curves.png         2.8 in  fire caught and false alarms per hit against the area flagged
   fig_distance_bands.png        2.4 in  fire caught by distance to recent fire, 2019 best-F2 thresholds
   fig_explain_importance.png    3.0 in  (a) both importance measures per input, (b, c) displaced
                                         share by land cover and climate zone
@@ -98,8 +98,8 @@ def budget_curves():
               ("SMOLDER, one threshold for all days", ACCENT, (0, (5, 3)), ("adaptive", "SMOLDER")),
               ("Persistence, same area every day", GREY, "-", ("fixed", "persistence")),
               ("Persistence, one threshold for all days", GREY, (0, (5, 3)), ("adaptive", "persistence"))]
-    fig = plt.figure(figsize=(W, 2.6))
-    axes = [fig.add_axes([0.075, 0.16, 0.40, 0.76]), fig.add_axes([0.585, 0.16, 0.40, 0.76])]
+    fig = plt.figure(figsize=(W, 2.8))
+    axes = [fig.add_axes([0.075, 0.28, 0.40, 0.665]), fig.add_axes([0.585, 0.28, 0.40, 0.665])]
     for lab, col, ls, (rule, name) in series:
         if rule == "fixed":
             r = OP["rankings"][name]; k, rec, fpt = np.array(r["k"]), np.array(r["recall"]), np.array(r["fp_per_tp"])
@@ -107,6 +107,16 @@ def budget_curves():
             c = AB["adaptive_curve"][name]; k, rec, fpt = np.array(c["mean_share"]), np.array(c["recall"]), np.array(c["fp_per_tp"])
         axes[0].plot(100 * k, 100 * rec, color=col, ls=ls, lw=1.3, label=lab)
         axes[1].plot(100 * k, fpt, color=col, ls=ls, lw=1.3)
+    fpath = os.path.join(RUN, "fine_bands_area_2020.json")
+    if os.path.exists(fpath):                                  # area needed for 50 % and 75 % (one threshold)
+        AR = json.load(open(fpath))["area_for_recall"]
+        for name, col in (("SMOLDER", ACCENT), ("persistence", GREY)):
+            for tgt in ("50 %", "75 %"):
+                a_ = AR[name]["one threshold"][tgt]
+                axes[0].plot(100 * a_, float(tgt[:2]), "D", ms=3.0, color=col, zorder=6)
+        for tgt in (50, 75):
+            axes[0].axhline(tgt, color=MUTED, lw=0.6, ls=":", zorder=1)
+        axes[0].plot([], [], "D", ms=3.0, color=INK, ls="none", label="area that catches 50 % and 75 % (one threshold)")
     for name, col in (("SMOLDER", ACCENT), ("persistence", GREY)):        # best-F2 threshold of 2019
         b = AB["adaptive_best"][name][CRIT]
         axes[0].plot(100 * b["mean_share"], 100 * b["recall"], "o", ms=3.5, mfc="white", mec=col, mew=1.0, zorder=5)
@@ -119,29 +129,34 @@ def budget_curves():
     axes[0].set_ylim(0, 100)
     axes[1].set_yscale("log"); axes[1].set_ylim(1, 300)
     axes[1].set_yticks([1, 3, 10, 30, 100, 300]); axes[1].set_yticklabels(["1", "3", "10", "30", "100", "300"]); axes[1].minorticks_off()
-    axes[0].legend(loc="upper left", frameon=True, facecolor="white", edgecolor="#C8C8CC")
+    h_, l_ = axes[0].get_legend_handles_labels()              # one legend for both panels, below them
+    fig.legend(h_, l_, loc="lower center", ncol=3, frameon=False, bbox_to_anchor=(0.53, 0.0), columnspacing=1.6)
     for ax, t in zip(axes, "ab"):
         style_axes(ax); tag(ax, t)
-    save(fig, "fig_budget_curves.png", 2.6)
+    save(fig, "fig_budget_curves.png", 2.8)
 
 
 def distance_bands():
-    OP = json.load(open(os.path.join(RUN, "operating_point_2020.json")))
-    AB = json.load(open(os.path.join(RUN, "adaptive_budget_2020.json")))["adaptive_best"]
-    bands = ["0-3 km", "3-10 km", "> 10 km"]; share = OP["bands"]["fire_share"]
-    bars = [("Persistence", GREY, AB["persistence"][CRIT]), ("SMOLDER", ACCENT, AB["SMOLDER"][CRIT])]
-    fig = plt.figure(figsize=(W, 2.4)); ax = fig.add_axes([0.075, 0.21, 0.9, 0.75])
-    x = np.arange(len(bands)); w = 0.32
+    """Fire caught by distance to the nearest fire of days D-2..D in fine bands, at the
+    best-F2 thresholds of 2019 (fine_bands_area_2020.json, smolder.evaluation.fine_bands_area)."""
+    F = json.load(open(os.path.join(RUN, "fine_bands_area_2020.json")))
+    fb = F["fine_bands"]; share = fb["fire_share"]
+    labels = ["0 km\n(burned\nitself)", "up to\n1 km", "1 to\n2 km", "2 to\n3 km", "3 to\n5 km", "5 to\n10 km",
+              "10 to\n25 km", "more than\n25 km"]
+    bars = [("Persistence", GREY, fb["persistence"]), ("SMOLDER", ACCENT, fb["SMOLDER"])]
+    fig = plt.figure(figsize=(W, 2.4)); ax = fig.add_axes([0.075, 0.27, 0.9, 0.69])
+    x = np.arange(len(labels)); w = 0.36
     for j, (lab, col, src) in enumerate(bars):
-        v = [100 * src[f"recall {b}"] for b in bands]; xx = x + (j - 0.5) * w
+        v = [100 * r for r in src["recall"]]; xx = x + (j - 0.5) * w
         ax.bar(xx, v, w * 0.9, color=col, zorder=3,
-               label=f"{lab} (flags {100 * src['mean_share']:.3f} % of the land per day on average)")
+               label=f"{lab} (flags {100 * src['mean_share_flagged']:.3f} % of the land per day on average)")
         for xi, vi in zip(xx, v):
             ax.text(xi, vi + 1.2, f"{vi:.1f}" if vi < 10 else f"{vi:.0f}", ha="center", va="bottom", fontsize=6, color=INK)
     ax.set_xticks(x)
-    ax.set_xticklabels([f"{b.replace('-', ' to ')}  ({100 * s:.0f} % of fire)" for b, s in zip(bands, share)])
-    ax.set_xlabel("Distance to the nearest fire detected on the issue day or the two days before")
-    ax.set_ylabel("Fire caught (%)"); ax.set_ylim(0, 100)
+    ax.set_xticklabels([f"{l}\n({100 * s_:.1f} % of fire)" for l, s_ in zip(labels, share)], fontsize=6,
+                       linespacing=0.95)
+    ax.set_xlabel("Distance to the nearest fire detected on the issue day or the two days before", labelpad=2)
+    ax.set_ylabel("Fire caught (%)"); ax.set_ylim(0, 105)
     style_axes(ax, grid_x=False)
     ax.legend(loc="upper right", frameon=True, facecolor="white", edgecolor="#C8C8CC")
     save(fig, "fig_distance_bands.png", 2.4)
@@ -189,50 +204,53 @@ def importance():
 
 
 def events():
+    """Event maps: per event two panels, persistence and SMOLDER, each flagging at its
+    best-F2 threshold of 2019. Warm colours are fire, the cool colour is the flagged
+    area: fire of the next 3 days dark red inside the flagged area (caught) and orange
+    outside it (missed); fire of the previous 3 days as a dark outline on top."""
     year = int(os.environ.get("YEAR", 2020)); z = np.load(os.environ["EVENT_CACHE"])
-    # muted but distinct: recent fire amber, later fire brick red, flagged blue tones; coastline grey
-    OCEAN, LAND, RECENT, HIT, MISS, FALSE = "#FFFFFF", "#E9E9EC", "#D69A3C", "#2F6DA8", "#B8473F", "#A9C8E6"
-    COAST = "#7A7A80"
-    cmap = ListedColormap([OCEAN, LAND, RECENT, HIT, MISS, FALSE]); S = 192
+    OCEAN, LAND, FLAG, CAUGHT, MISSED = "#FFFFFF", "#ECECEE", "#BCD4EA", "#9E2A2B", "#EE9B3B"
+    PREV, COAST = "#2E2E33", "#8A8A90"
+    cmap = ListedColormap([OCEAN, LAND, FLAG, CAUGHT, MISSED]); S = 192
     LON0, LAT0, PX = 112.904998779, -9.005000113999998, 0.01
 
-    def rgb(land, recent, y, flag):
-        c = np.where(land, 1, 0); c = np.where(recent, 2, c)
-        if flag is None:
-            return np.where(y, 4, c)
-        c = np.where(flag & ~y, 5, c); c = np.where(flag & y, 3, c)
+    def rgb(land, y, flag):
+        c = np.where(land, 1, 0)
+        c = np.where(flag & ~y, 2, c)
+        c = np.where(flag & y, 3, c)
         return np.where(~flag & y, 4, c)
 
     for kind in ("well", "poorly"):
         n = sum(1 for k in z.files if k.startswith(kind) and k.endswith("_meta"))
         fig = plt.figure(figsize=(W, 3.4))
-        pw, gap, x_ev = 0.155, 0.008, (0.012, 0.512)
+        pw, ph, gap, x_ev, y_row = 0.170, 0.170 * W / 3.4, 0.01, (0.11, 0.54), (0.555, 0.085)
         for i in range(n):
             p = f"{kind}{i}_"; D, y0, x0, _ = z[p + "meta"]
             land, recent, y = z[p + "land"], z[p + "recent"], z[p + "y"]
             lat = LAT0 - (y0 + S / 2) * PX; lon = LON0 + (x0 + S / 2) * PX; nf = int(y.sum())
             col, row = i % 2, i // 2
-            yb = 0.565 - row * 0.455
-            for j, (c, title) in enumerate((("obs", None), ("persistence", "Persistence"), ("full", "SMOLDER"))):
-                ax = fig.add_axes([x_ev[col] + j * (pw + gap), yb, pw, pw * W / 3.4])
-                flag = None if c == "obs" else z[p + c]
-                ax.imshow(rgb(land, recent, y, flag), cmap=cmap, vmin=-0.5, vmax=5.5, interpolation="nearest")
+            fig.text(x_ev[col], y_row[row] + ph + 0.075, f"{str(z[p + 'date'])}, {abs(lat):.1f}°S {lon:.1f}°E, "
+                     f"{nf:,} fire pixels in the next 3 days", fontsize=6, color=INK, fontweight="bold")
+            for j, (c, title) in enumerate((("persistence", "Persistence"), ("full", "SMOLDER"))):
+                ax = fig.add_axes([x_ev[col] + j * (pw + gap), y_row[row], pw, ph])
+                flag = z[p + c]
+                ax.imshow(rgb(land, y, flag), cmap=cmap, vmin=-0.5, vmax=4.5, interpolation="nearest")
                 ax.contour(land.astype(float), levels=[0.5], colors=COAST, linewidths=0.5)
+                if recent.any():
+                    ax.contour(recent.astype(float), levels=[0.5], colors=PREV, linewidths=0.45)
                 ax.set_xticks([]); ax.set_yticks([])
-                for s in ax.spines.values():
-                    s.set_color("#9A9AA0"); s.set_linewidth(0.5)
-                if c == "obs":
-                    ax.set_title(f"{str(z[p + 'date'])}, {abs(lat):.1f}°S {lon:.1f}°E\n{nf:,} fire px",
-                                 fontsize=6, color=INK, loc="left", pad=2)
+                for sp in ax.spines.values():
+                    sp.set_color("#9A9AA0"); sp.set_linewidth(0.5)
+                hit = int((flag & y).sum()); fa = int((flag & ~y).sum())
+                ax.set_title(f"{title}\n{100 * hit / max(nf, 1):.0f} % caught, {fa:,} false alarms", fontsize=6,
+                             color=INK, loc="left", pad=2)
+                if j == 0:
                     ax.plot([8, 58], [S - 10, S - 10], color=INK, lw=1.0)
                     ax.text(33, S - 14, "50 km", ha="center", va="bottom", fontsize=6, color=INK)
-                else:
-                    hit = int((flag & y).sum()); fa = int((flag & ~y).sum())
-                    ax.set_title(f"{title}\n{100 * hit / max(nf, 1):.0f} % caught, {fa:,} false", fontsize=6,
-                                 color=INK, loc="left", pad=2)
-        handles = [Patch(color=RECENT, label="fire on days D-2 to D"), Patch(color=HIT, label="flagged, burned"),
-                   Patch(color=MISS, label="burned, not flagged (left: all fire D+1 to D+3)"),
-                   Patch(color=FALSE, label="flagged, no fire"),
+        handles = [Patch(facecolor="none", edgecolor=PREV, lw=0.8, label="fire on the previous 3 days"),
+                   Patch(color=CAUGHT, label="fire in the next 3 days, flagged"),
+                   Patch(color=MISSED, label="fire in the next 3 days, not flagged"),
+                   Patch(color=FLAG, label="flagged, no fire"),
                    matplotlib.lines.Line2D([], [], color=COAST, lw=0.8, label="coastline")]
         fig.legend(handles=handles, loc="lower center", ncol=5, frameon=False, fontsize=6, bbox_to_anchor=(0.5, 0.0),
                    handlelength=1.2, columnspacing=1.0)

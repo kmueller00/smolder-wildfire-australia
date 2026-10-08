@@ -33,12 +33,14 @@ into the model.
 **fig_explain_prefire.png.** How the pixels of each forecast outcome in 2020
 differed beforehand from other land of the same patch and issue day: fire
 SMOLDER caught, fire it missed and its false alarms (threshold chosen on 2019,
-best F2), for (a) soil moisture index, (b) rain per 8 days, (c) leaf area
-index and (d) vapour pressure deficit. Line: mean difference over patches,
-weighted by the outcome's pixels in each patch; band: 95 % bootstrap interval
-over patches. Slow inputs are 8-day periods drawn at their centre; leaf area
-index is drawn at the date it was observed, 31 days before the model receives
-it.
+best F2; outcomes from the stored national scores), for (a) soil moisture
+index, (b) rain per 8 days, (c) leaf area index, (d) vapour pressure deficit,
+(e) maximum air temperature and (f) NDVI. Lines: mean difference over 1500
+fire-active patches, weighted by the outcome's pixels in each patch; bands:
+95 % bootstrap interval over patches. Slow inputs are 8-day periods drawn at
+their centre; leaf area index is drawn at the date it was observed, 31 days
+before the model receives it, and NDVI at the date of the composite the model
+reads, 7 days before.
 
 **fig_explain_conditions.png.** Where the forecast outcomes of 2020 lie
 relative to fire already burning, with the threshold chosen on 2019 (best
