@@ -9,8 +9,10 @@ explain run used THRESHOLD_FROM, else the top 1 % of each patch.
         when --pixels is given, the paper figures (6.93 in, 450 dpi)
           fig_explain_conditions.png  (a) distance to recent fire by outcome,
                                       (b-e) issue-day conditions by outcome and climate
-          fig_explain_prefire.png     burned minus not burned in the same patch
-                                      over the look-back window, 95 % interval
+          fig_explain_prefire.png     caught fire, missed fire and false alarms minus
+                                      other land of the same patch over the look-back
+                                      window, 95 % interval (the all-fire version only
+                                      as numbers: key prefire)
         plus explain_figures_numbers.json with the plotted numbers.
 """
 import json
@@ -229,7 +231,7 @@ TRAJ_PAPER = [("sm", 18, "Soil moisture index", "slow"), ("ppt", 18, "Rain per 8
 LAI_LAG = 31
 
 
-def prefire(pixels, n_boot=1000):
+def prefire(pixels, n_boot=1000, draw=False):
     """Burned pixels minus not-burned pixels of the same patch (same place and
     issue day), over the model's look-back window. Per patch: weighted mean of
     the burned sample (caught + missed, weighted to their true sizes) minus the
@@ -281,9 +283,10 @@ def prefire(pixels, n_boot=1000):
         _paper_axes(ax)
         out[prefix] = dict(x=x.tolist(), mean=mean.tolist(), ci95_lo=lo.tolist(), ci95_hi=hi.tolist(),
                            n_patches=int(len(D)))
-    fig.savefig(os.path.join(FIG_OUT, "fig_explain_prefire.png"), dpi=PDPI, facecolor="white")
+    if draw:
+        fig.savefig(os.path.join(FIG_OUT, "fig_explain_prefire_allfire.png"), dpi=PDPI, facecolor="white")
+        print("wrote fig_explain_prefire_allfire.png")
     plt.close(fig)
-    print("wrote fig_explain_prefire.png")
     return out
 
 
@@ -316,6 +319,69 @@ def _prefire_figure(S, title, out, bins_end_on_issue_day=False):
     print("wrote", out)
 
 
+def prefire_by_outcome(pixels, n_boot=500):
+    """fig_explain_prefire.png: the pre-fire difference to other land of the same patch and day,
+    separately for fire SMOLDER caught, fire it missed and its false alarms.
+    Per patch the weighted mean of the outcome's sample minus the mean of the
+    'other land' sample; mean over patches weighted by the outcome's pixels in
+    the patch; 95 % bootstrap interval over patches."""
+    import pandas as pd
+    _paper_rc()
+    p = pd.read_csv(pixels)
+    p["w"] = _weights(p)
+    rng = np.random.default_rng(0)
+    lines = [("hit", "fire SMOLDER caught", "#0E8C6E", "-"), ("miss", "fire SMOLDER missed", "#C2185B", "-"),
+             ("false_alarm", "false alarms", "#DB8A0A", (0, (4, 2)))]
+    fig = plt.figure(figsize=(PW, 1.9))
+    x0, wd, gap = 0.075, 0.2, 0.04
+    ctrl = (p.cls == "background").values
+    pid = p.patch.values
+    out = {}
+    for k, (prefix, n, label, kind) in enumerate(TRAJ_PAPER):
+        cols = [f"{prefix}_{'d' if prefix == 'vpd' else 'b'}{j:02d}" for j in range(n)]
+        V = p[cols].values
+        if kind == "fast":
+            x = np.arange(-(n - 1), 1)
+        else:
+            x = -(np.arange(n)[::-1] * 8 + 7.5) - (LAI_LAG if kind == "lai" else 0)
+        ax = fig.add_axes([x0 + k * (wd + gap), 0.2, wd, 0.6])
+        ax.axhline(0, color=INK, lw=0.6, zorder=2)
+        for cls, lab, col, ls in lines:
+            sel = (p.cls == cls).values
+            diffs, wts = [], []
+            for q in np.unique(pid[sel]):
+                m = pid == q
+                b, c = m & sel, m & ctrl
+                if b.sum() < 5 or c.sum() < 5:
+                    continue
+                wb = p.w.values[b]
+                mb = np.nansum(V[b] * wb[:, None], axis=0) / np.sum(np.isfinite(V[b]) * wb[:, None], axis=0)
+                diffs.append(mb - np.nanmean(V[c], axis=0)); wts.append(wb.sum())
+            D, Wt = np.array(diffs), np.array(wts); ok = np.isfinite(D)
+            mean = np.nansum(D * Wt[:, None], axis=0) / np.sum(ok * Wt[:, None], axis=0)
+            boots = []
+            for _ in range(n_boot):
+                i = rng.integers(0, len(D), len(D))
+                boots.append(np.nansum(D[i] * Wt[i, None], axis=0) / np.sum(ok[i] * Wt[i, None], axis=0))
+            lo, hi = np.percentile(boots, [2.5, 97.5], axis=0)
+            ax.fill_between(x, lo, hi, color=col, alpha=0.15, lw=0, zorder=3)
+            ax.plot(x, mean, color=col, ls=ls, lw=1.3, zorder=4, label=lab)
+            out.setdefault(prefix, {})[cls] = dict(x=x.tolist(), mean=mean.tolist(), ci95_lo=lo.tolist(),
+                                                   ci95_hi=hi.tolist(), n_patches=int(len(D)))
+        ax.set_xlim(x[0], x[-1] if kind == "fast" else 0)
+        ax.set_title(f"({'abcd'[k]}) {label}", fontsize=PFS, color=INK, loc="left", pad=3, x=-0.02)
+        ax.set_xlabel("Days before the issue day", labelpad=1)
+        if k == 0:
+            ax.set_ylabel("Difference to other land", labelpad=1)
+        _paper_axes(ax)
+    h, l = ax.get_legend_handles_labels()
+    fig.legend(h, l, loc="upper center", ncol=3, frameon=False, bbox_to_anchor=(0.5, 1.0), handlelength=2.2)
+    fig.savefig(os.path.join(FIG_OUT, "fig_explain_prefire.png"), dpi=PDPI, facecolor="white")
+    plt.close(fig)
+    print("wrote fig_explain_prefire.png (by outcome)")
+    return out
+
+
 def prefire_newfire():
     """Same figure for pixels more than 10 km from any fire of the last 32 days
     (2019, results/anomaly_feature_diagnostic_2019.json)."""
@@ -336,11 +402,13 @@ if __name__ == "__main__":
         if "--pixels" in sys.argv:
             px = sys.argv[sys.argv.index("--pixels") + 1]
             shares, quartiles = conditions(px)
-            traj = prefire(px)
+            traj = prefire(px)                                  # all burned pixels: numbers only
+            by_outcome = prefire_by_outcome(px)                 # the figure
             with open(os.path.join(FIG_OUT, "explain_figures_numbers.json"), "w") as fh:
                 json.dump(dict(pixels=os.path.abspath(px), distance_shares_pct=shares,
                                distance_bands=[b[0] for b in DIST_BANDS],
-                               conditions_weighted_q25_median_q75_n=quartiles, prefire=traj), fh, indent=1)
+                               conditions_weighted_q25_median_q75_n=quartiles, prefire=traj,
+                               prefire_by_outcome=by_outcome), fh, indent=1)
         else:
             print("skipped fig_explain_conditions.png and fig_explain_prefire.png (need --pixels PIXELS.csv.gz)")
         prefire_newfire()

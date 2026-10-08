@@ -30,15 +30,15 @@ loss. (b) Average precision on the 1024 validation patches of 2019 at every
 epoch; the orange markers show the three epochs whose weights were averaged
 into the model.
 
-**fig_explain_prefire.png.** How pixels that burned in the three days after
-the issue day differed beforehand from pixels of the same patch and issue day
-that did not burn, 2020: (a) soil moisture index, (b) rain per 8 days, (c) leaf
-area index, (d) vapour pressure deficit. Line: mean difference over patches,
-weighted by the number of burned pixels; band: 95 % bootstrap interval over
-patches; above zero means higher in burned pixels. Comparing within a patch
-removes differences of region and season. Slow inputs are 8-day periods drawn
-at their centre; leaf area index is drawn at the date it was observed, 31 days
-before the model receives it.
+**fig_explain_prefire.png.** How the pixels of each forecast outcome in 2020
+differed beforehand from other land of the same patch and issue day: fire
+SMOLDER caught, fire it missed and its false alarms (threshold chosen on 2019,
+best F2), for (a) soil moisture index, (b) rain per 8 days, (c) leaf area
+index and (d) vapour pressure deficit. Line: mean difference over patches,
+weighted by the outcome's pixels in each patch; band: 95 % bootstrap interval
+over patches. Slow inputs are 8-day periods drawn at their centre; leaf area
+index is drawn at the date it was observed, 31 days before the model receives
+it.
 
 **fig_explain_conditions.png.** Where the forecast outcomes of 2020 lie
 relative to fire already burning, with the threshold chosen on 2019 (best

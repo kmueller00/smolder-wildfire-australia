@@ -358,14 +358,18 @@ than other land: in the temperate zone soil moisture
 
 ![what precedes fire](figures/fig_explain_prefire.png)
 
-*Pixels that burned minus pixels of the same patch and day that did not,
-over the model's look-back window (95 % interval over patches).* Burned
-pixels had wetter soil (+0.021 about 100 days before) and more rain three to
-four months before, carried more leaf area throughout (+0.15 to +0.17), and
-had slightly lower vapour pressure deficit; by the last 8-day period the
-difference in soil moisture and rain has gone. This fits fuel that grew
-after a wet period and dried out before the fire. The signal is real but
-small next to the effect of fire burning nearby.
+*Fire SMOLDER caught, fire it missed and its false alarms, each minus other
+land of the same patch and day, over the model's look-back window (95 %
+interval over patches; `explain_figures_numbers.json`: prefire_by_outcome).*
+The fire SMOLDER caught burned where the soil had dried out (soil moisture
+0.016 below the surrounding land in the last 8-day average) and the
+vegetation was densest (leaf area index 0.24 above). The fire it missed
+burned on soil that was moister than the surroundings (+0.006) and carried
+less vegetation (+0.12). False alarms lie in between. All burned pixels had
+more rain three to four months before, which fits fuel that grew after a wet
+period. So the model catches fire where the weather and fuel signals point to
+it and, beyond being far from earlier fire, misses fire where these signals
+are weak.
 
 ## Keeping later information out of the inputs
 
