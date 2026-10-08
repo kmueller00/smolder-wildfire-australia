@@ -55,7 +55,14 @@
   "precision_f2": 2.166711165232691,
   "auc_pr_over_base_rate_SMOLDER": 380.9113314459359,
   "auc_pr_over_base_rate_persistence": 114.09141839859407,
-  "area_f2_SMOLDER_over_persistence": 0.5065607712214675
+  "area_f2_SMOLDER_over_persistence": 0.5065607712214675,
+  "precision_f2_over_base_rate_SMOLDER": 431.1764609633282,
+  "precision_f2_over_base_rate_persistence": 199.00043341357068
+ },
+ "within_10km": {
+  "share_of_all_fire": 0.5833888280049709,
+  "recall_SMOLDER_f2": 0.5184212300294362,
+  "recall_persistence_f2": 0.47593420668269554
  },
  "f2_hindsight": {
   "SMOLDER": {

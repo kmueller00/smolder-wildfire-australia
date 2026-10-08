@@ -9,7 +9,9 @@ For YEAR (default 2019) and the run RUN (default the final model):
                    bands.fire_share)
   ratios           SMOLDER over persistence: pooled AUC-PR (national_<YEAR>.json and the
                    persistence file), precision and flagged area at the best-F2 thresholds;
-                   pooled AUC-PR over the base rate of the year, for both
+                   pooled AUC-PR and precision over the base rate of the year, for both
+  within_10km      share of all fire within 10 km of recent fire, and the share of that
+                   fire caught at the best-F2 thresholds
   f2_hindsight     the best F2 on the year's threshold sweep (adaptive_curve) against the
                    F2 at the threshold used; a diagnostic of how well the 2019 threshold
                    transfers, not a choice
@@ -62,7 +64,14 @@ def main():
                          auc_pr_over_base_rate_SMOLDER=S["pooled_auc_pr"] / S["base_rate"],
                          auc_pr_over_base_rate_persistence=P["pooled_auc_pr"] / P["base_rate"],
                          area_f2_SMOLDER_over_persistence=ab["SMOLDER"]["f2"]["mean_share"]
-                         / ab["persistence"]["f2"]["mean_share"])
+                         / ab["persistence"]["f2"]["mean_share"],
+                         precision_f2_over_base_rate_SMOLDER=ab["SMOLDER"]["f2"]["precision"] / S["base_rate"],
+                         precision_f2_over_base_rate_persistence=ab["persistence"]["f2"]["precision"] / P["base_rate"])
+    # the part of the fire that lies within 10 km of recent fire, and how much of it is caught
+    near = share[0] + share[1]
+    out["within_10km"] = dict(share_of_all_fire=near, **{
+        f"recall_{name}_f2": (ab[name]["f2"]["recall 0-3 km"] * share[0] + ab[name]["f2"]["recall 3-10 km"] * share[1]) / near
+        for name in ("SMOLDER", "persistence")})
     # diagnostic, no choice: the best F2 on this year's threshold sweep against the F2
     # of the threshold actually used (chosen on 2019); precision = 1 / (1 + fp_per_tp)
     curve = json.load(open(os.path.join(RUN_DIR, f"adaptive_budget_{YEAR}.json")))["adaptive_curve"]

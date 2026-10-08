@@ -450,6 +450,16 @@ this upper bound.
   detections enter as negatives, both as targets and in the fire history.
 - **One validation year, one test year, one training seed.** 2020 includes
   the end of the 2019/20 Black Summer season.
+- **The scale may be the wrong one for the predictable part.** In 2020, 58.3 %
+  of the fire lay within 10 km of fire of the three days before; SMOLDER
+  caught 51.8 % of it (persistence 47.6 %) and almost nothing of the rest
+  (`report_derived_2020.json`: within_10km). Fire spread near active fires
+  happens at hundreds of metres and hours, below the 1 km daily resolution.
+  A model of spread in a window of about 25 km around active fires, at higher
+  spatial and temporal resolution (375 m fire detections from both daily
+  overpasses or geostationary satellites, hourly weather), is a more
+  promising way to forecast that part; where new fires start remains a
+  probabilistic problem for fire danger ratings.
 - **Scores are rankings, not probabilities.** The positive-class weighting
   compresses the output; `smolder.evaluation.fit_recalibration` fits an
   isotonic map on 2019 if probabilities are needed.
