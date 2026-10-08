@@ -8,3 +8,8 @@ lightning_logs/
 logs/
 runs/
 *_pixels.csv.gz
+
+# local figure caches (rebuilt from the data; not part of the repository)
+figures/data/input_maps.npz
+figures/data/*_B.npz
+figures/data/event_maps_2019_final.npz
