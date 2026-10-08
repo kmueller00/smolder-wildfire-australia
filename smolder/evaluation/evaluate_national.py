@@ -60,7 +60,7 @@ from smolder.data.io import daily_cube, open_zarr_root
 from smolder.data.zarr_dual_datamodule import check_checkpoint_inputs, DualPatchConfig, DualWindowDataset
 from smolder.models.conv_lstm_lit_dual import ConvLSTMLitDual
 
-CKPT = os.environ.get("CKPT", "checkpoints/smolder_swa.ckpt")
+CKPT = os.environ.get("CKPT", "checkpoints/smolder_causal_swa.ckpt")
 EVAL_YEAR = int(os.environ.get("EVAL_YEAR", 2020))
 CALIB_YEAR = os.environ.get("CALIB_YEAR", "")
 CALIB_STRIDE = int(os.environ.get("CALIB_STRIDE", 5))
@@ -211,8 +211,11 @@ def valid_days(year, stride):
     g = open_zarr_root(daily_cube(year))
     valid = np.asarray(g["y_fire_3d_valid"][...]) > 0 if "y_fire_3d_valid" in g else np.ones(g["X"].shape[0], bool)
     T = g["X"].shape[0]
-    # issue day D needs 14 fast days (D-13..D) inside the cube and a valid target
-    return [D for D in range(13, T) if valid[D]][::stride], g
+    # issue day D needs 14 fast days (D-13..D) inside the cube and a valid target; with
+    # CAUSAL_INPUTS (default) also a target window D+1..D+3 inside the year, so the last
+    # days of 2019 carry no labels of the test year 2020
+    causal = os.environ.get("CAUSAL_INPUTS", "1") == "1"
+    return [D for D in range(13, T) if valid[D] and (not causal or D + 3 <= T - 1)][::stride], g
 
 
 # ---------------------------------------------------------------- main

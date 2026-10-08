@@ -21,7 +21,7 @@ from smolder.models.conv_lstm_lit_dual import ConvLSTMLitDual
 from smolder.data.io import daily_cube
 from smolder.data.zarr_dual_datamodule import DualWindowDataset, DualPatchConfig
 
-CKPT = os.environ.get("CKPT", "checkpoints/smolder_swa.ckpt")
+CKPT = os.environ.get("CKPT", "checkpoints/smolder_causal_swa.ckpt")
 PATCH = int(os.environ.get("PATCH", 384))
 N_PATCHES = int(os.environ.get("N_PATCHES", 400))
 OUT = os.environ.get("OUT", "recal_isotonic_smolder.pkl")

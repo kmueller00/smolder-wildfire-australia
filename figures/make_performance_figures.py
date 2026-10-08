@@ -20,15 +20,17 @@ from style_smolder import ACCENT, INK, MUTED, new_figure, style_axes
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 RES = os.environ.get("RESULTS_DIR", os.path.join(HERE, "..", "results", "experiments", "smolder"))
-OP = json.load(open(os.path.join(RES, "operating_point_2019.json")))
-AB = json.load(open(os.path.join(RES, "adaptive_budget_2019.json")))
+YEAR = int(os.environ.get("YEAR", 2019))
+FIG_OUT = os.environ.get("FIG_OUT", HERE)
+OP = json.load(open(os.path.join(RES, f"operating_point_{YEAR}.json")))
+AB = json.load(open(os.path.join(RES, f"adaptive_budget_{YEAR}.json")))
 
 GREY = "#5F5F64"
 LIGHT_BLUE = "#8DB6D9"
 LIGHT_GREY = "#B4B4B9"
 BUDGET = 0.0013
 SERIES = [  # label, colour, linestyle, source
-    ("SMOLDER, fixed daily area", ACCENT, "-", ("fixed", "full_s123")),
+    ("SMOLDER, fixed daily area", ACCENT, "-", ("fixed", os.environ.get("OP_RUN", "full_s123"))),
     ("SMOLDER, adaptive daily area", ACCENT, (0, (5, 3)), ("adaptive", "SMOLDER")),
     ("Persistence, fixed daily area", GREY, "-", ("fixed", "persistence")),
     ("Persistence, adaptive daily area", GREY, (0, (5, 3)), ("adaptive", "persistence")),
@@ -70,7 +72,7 @@ def budget_curves():
     axes[0].text(100 * BUDGET * 1.12, 3, "0.13 %", fontsize=8.5, color=MUTED)
     axes[0].legend(fontsize=8.6, loc="upper left", frameon=True, facecolor="white", edgecolor="#C8C8CC")
     fig.tight_layout()
-    fig.savefig(os.path.join(HERE, "fig_budget_curves.png"), dpi=300, bbox_inches="tight", facecolor="white")
+    fig.savefig(os.path.join(FIG_OUT, "fig_budget_curves.png"), dpi=300, bbox_inches="tight", facecolor="white")
     print("wrote fig_budget_curves.png")
 
 
@@ -102,7 +104,7 @@ def distance_bands():
     style_axes(ax, grid_x=False)
     ax.legend(fontsize=8.6, loc="upper right", frameon=True, facecolor="white", edgecolor="#C8C8CC")
     fig.tight_layout()
-    fig.savefig(os.path.join(HERE, "fig_distance_bands.png"), dpi=300, bbox_inches="tight", facecolor="white")
+    fig.savefig(os.path.join(FIG_OUT, "fig_distance_bands.png"), dpi=300, bbox_inches="tight", facecolor="white")
     print("wrote fig_distance_bands.png")
 
 

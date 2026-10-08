@@ -1,0 +1,20 @@
+[persistence] 2020: 350 issue days, 32 workers
+  25/350 days, 0.4 s/day
+  50/350 days, 0.3 s/day
+  75/350 days, 0.3 s/day
+  100/350 days, 0.3 s/day
+  125/350 days, 0.2 s/day
+  150/350 days, 0.2 s/day
+  175/350 days, 0.2 s/day
+  200/350 days, 0.2 s/day
+  225/350 days, 0.2 s/day
+  250/350 days, 0.2 s/day
+  275/350 days, 0.2 s/day
+  300/350 days, 0.2 s/day
+  325/350 days, 0.2 s/day
+  350/350 days, 0.2 s/day
+
+*** PERSISTENCE 2020: 350 days, base rate 0.00032 ***
+  pooled AUC-PR 0.0361  ROC-AUC 0.9358
+  25 km cells: pooled AUC-PR 0.3691
+wrote national_2020_persistence.json, _persistence_daily.csv

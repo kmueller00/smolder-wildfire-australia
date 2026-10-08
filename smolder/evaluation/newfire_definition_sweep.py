@@ -30,7 +30,7 @@ from smolder.data.zarr_dual_datamodule import DualPatchConfig, DualWindowDataset
 
 # CKPTS may list several checkpoints (colon-separated); each is scored on the
 # same patches. Default: the released model.
-CKPTS = [p for p in os.environ.get("CKPTS", os.environ.get("CKPT", "checkpoints/smolder_swa.ckpt")).split(":") if p.strip()]
+CKPTS = [p for p in os.environ.get("CKPTS", os.environ.get("CKPT", "checkpoints/smolder_causal_swa.ckpt")).split(":") if p.strip()]
 CKPT = CKPTS[0]
 PATCH = int(os.environ.get("PATCH", 384))
 N_PATCH = int(os.environ.get("N_PATCH", 600))

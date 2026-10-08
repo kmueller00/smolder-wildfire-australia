@@ -2,8 +2,11 @@
 where it does not -- SMOLDER and the persistence baseline side by side at the
 same national alert budget.
 
-Every ranking flags its national top 0.13 % of land pixels per issue day (SMOLDER's
-best-F2 budget, results/experiments/smolder/operating_point_2019.md).
+Flagging: with THRESHOLDS_FROM=<adaptive_budget_2019.json> every ranking flags
+the pixels above its own best-F2 score threshold of 2019 (THRESHOLD_CRIT, default
+f2), the same threshold on every day, so the flagged area follows the day's
+fire situation (the rule of smolder.evaluation.adaptive_budget). Without it,
+every ranking flags its national top BUDGET (default 0.13 %) of land per day.
 For each 192 x 192 km window and day the hits, false alarms and misses of
 every ranking are counted; events are then chosen from fire-active windows
 (>= MIN_FIRE target fire pixels):
@@ -31,11 +34,16 @@ from matplotlib.patches import Patch
 from style_smolder import INK, PANEL_BG
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-CACHE = os.path.join(HERE, "data", "event_maps_2019.npz")
-OUTS = {"well": os.path.join(HERE, "fig_events_well_2019.png"),
-        "poorly": os.path.join(HERE, "fig_events_poorly_2019.png")}
+YEAR = int(os.environ.get("YEAR", 2019))
+CACHE = os.environ.get("EVENT_CACHE", os.path.join(HERE, "data", f"event_maps_{YEAR}.npz"))
+FIG_OUT = os.environ.get("FIG_OUT", HERE)
+OUTS = {"well": os.path.join(FIG_OUT, f"fig_events_well_{YEAR}.png"),
+        "poorly": os.path.join(FIG_OUT, f"fig_events_poorly_{YEAR}.png")}
 LON0, LAT0, PX = 112.904998779, -9.005000113999998, 0.01
-BUDGET = 0.0013
+BUDGET = float(os.environ.get("BUDGET", 0.0013))
+THRESHOLDS_FROM = os.environ.get("THRESHOLDS_FROM")
+THRESHOLD_CRIT = os.environ.get("THRESHOLD_CRIT", "f2")
+NAME_IN_AB = {"persistence": "persistence", "full": "SMOLDER"}     # names in adaptive_budget json
 BLOCK, WIN = 64, 3                        # windows of 3 x 3 blocks = 192 px, stride 64 px
 MIN_FIRE = 400
 N_EV = 4
@@ -43,7 +51,7 @@ SEP_DAYS, SEP_PX = 30, 300
 RANKINGS = ["persistence", "full"]
 TITLES = {"persistence": "Persistence", "full": "SMOLDER"}
 SCORE_DIR = "/home/saturn/gwgi/gwgi107h/wildfire_data/firecastnet/experiments_scores"
-SCORES = {"full": f"{SCORE_DIR}/full_model_seed123_2019.npy"}
+SCORES = {"full": os.environ.get("EVENT_SCORES", f"{SCORE_DIR}/full_model_seed123_{YEAR}.npy")}
 
 OCEAN = "#FFFFFF"
 LAND = "#ECECEE"
@@ -57,10 +65,24 @@ G = {}
 # ------------------------------------------------------------------ compute
 def _init():
     from smolder.data.io import daily_cube, open_zarr_root
-    g = open_zarr_root(daily_cube(2019))
+    g = open_zarr_root(daily_cube(YEAR))
     G["y"] = g["y_fire_3d"]
     G["land"] = np.asarray(g["landmask"][...]) > 0
     G["scores"] = {n: np.load(p, mmap_mode="r") for n, p in SCORES.items()}
+    if THRESHOLDS_FROM:
+        import json
+        ab = json.load(open(THRESHOLDS_FROM))["adaptive_best"]
+        G["thr"] = {n: ab[NAME_IN_AB[n]][THRESHOLD_CRIT]["threshold"] for n in RANKINGS}
+
+
+def _transform(n, s):
+    """Score scale of adaptive_budget.py: logit for SMOLDER, -log(1 + distance)
+    for persistence (whose score is -(distance + jitter))."""
+    s = s.astype(np.float64)
+    if n == "persistence":
+        return -np.log1p(-s)
+    s = np.clip(s, 1e-7, 1 - 1e-7)
+    return np.log(s / (1 - s))
 
 
 def _maps(D, row):
@@ -74,10 +96,12 @@ def _maps(D, row):
     flags = {}
     for n in RANKINGS:
         s = sb[land] if n == "persistence" else np.asarray(G["scores"][n][row], np.float32)
-        k = max(1, int(round(BUDGET * s.size)))
-        thr = np.partition(s, s.size - k)[s.size - k]
         f = np.zeros(land.shape, bool)
-        f[land] = s >= thr
+        if THRESHOLDS_FROM:
+            f[land] = _transform(n, s) >= G["thr"][n]
+        else:
+            k = max(1, int(round(BUDGET * s.size)))
+            f[land] = s >= np.partition(s, s.size - k)[s.size - k]
         flags[n] = f
     prob = np.full(land.shape, np.nan, np.float32)
     prob[land] = np.asarray(G["scores"]["full"][row], np.float32)
@@ -116,7 +140,7 @@ def compute():
     sys.path.insert(0, os.path.dirname(HERE))
     from smolder.data.io import daily_cube, open_zarr_root
     days = np.load(SCORES["full"] + ".days.npy")
-    times = list(open_zarr_root(daily_cube(2019)).attrs["time"])
+    times = list(open_zarr_root(daily_cube(YEAR)).attrs["time"])
     with Pool(int(os.environ.get("WORKERS", 24)), initializer=_init) as pool:
         res = list(pool.imap(_day, [(int(D), i) for i, D in enumerate(days)], chunksize=2))
     cand = []                                  # (kind, sort key, D, row, wy, wx, stats)
@@ -230,10 +254,16 @@ def event_table():
     (results/experiments/smolder/adaptive_budget_2019.json); written next to
     that file as event_maps_2019.json."""
     import json
-    res = os.path.join(HERE, "..", "results", "experiments", "smolder")
-    thr = json.load(open(os.path.join(res, "adaptive_budget_2019.json")))["adaptive"]["SMOLDER"][str(BUDGET)]["threshold"]
+    res = os.environ.get("EVENT_RES", os.path.join(HERE, "..", "results", "experiments", "smolder"))
     z = np.load(CACHE)
-    out = dict(budget=BUDGET, adaptive_logit_threshold=thr, events={})
+    if THRESHOLDS_FROM:                       # the cached flags already use the 2019 thresholds
+        ab = json.load(open(THRESHOLDS_FROM))["adaptive_best"]
+        thr = None
+        out = dict(flagging=f"best-{THRESHOLD_CRIT} thresholds of {THRESHOLDS_FROM}",
+                   thresholds={n_: ab[NAME_IN_AB[n_]][THRESHOLD_CRIT]["threshold"] for n_ in RANKINGS}, events={})
+    else:
+        thr = json.load(open(os.path.join(res, f"adaptive_budget_{YEAR}.json")))["adaptive"]["SMOLDER"][str(BUDGET)]["threshold"]
+        out = dict(budget=BUDGET, adaptive_logit_threshold=thr, events={})
     for kind in OUTS:
         n = sum(1 for k in z.files if k.startswith(kind) and k.endswith("_meta"))
         for i in range(n):
@@ -241,11 +271,12 @@ def event_table():
             y, land = z[p + "y"], z[p + "land"]
             pr = np.clip(z[p + "prob"].astype(np.float64), 1e-7, 1 - 1e-7)
             flags = {n_: z[p + n_] for n_ in RANKINGS}
-            flags["full_adaptive"] = (np.log(pr / (1 - pr)) >= thr) & land
+            if thr is not None:
+                flags["full_adaptive"] = (np.log(pr / (1 - pr)) >= thr) & land
             out["events"][f"{kind} {i + 1}"] = dict(date=str(z[p + "date"]), fire_px=int(y.sum()), **{
                 n_: dict(caught=float((f & y).sum() / max(y.sum(), 1)), false_alarms=int((f & ~y).sum()))
                 for n_, f in flags.items()})
-    path = os.path.join(res, "event_maps_2019.json")
+    path = os.path.join(res, f"event_maps_{YEAR}.json")
     json.dump(out, open(path, "w"), indent=1)
     print("wrote", path)
 

@@ -1,0 +1,126 @@
+{
+ "2019": {
+  "target": {
+   "differ": 2,
+   "checked": 9006822,
+   "share": 2.2205390536195786e-07
+  },
+  "hist lag3": {
+   "differ": 9,
+   "checked": 9006822,
+   "share": 9.992425741288104e-07
+  },
+  "hist lag4": {
+   "differ": 5,
+   "checked": 9006822,
+   "share": 5.551347634048947e-07
+  },
+  "hist lag5": {
+   "differ": 7,
+   "checked": 9006822,
+   "share": 7.771886687668525e-07
+  },
+  "hist lag3 shifted +1 (control)": {
+   "differ": 7481,
+   "checked": 9006822,
+   "share": 0.0008305926330064034
+  },
+  "distance": {
+   "differ": 0,
+   "checked": 9006822,
+   "share": 0.0
+  },
+  "frp sum": {
+   "differ": 0,
+   "checked": 9006822,
+   "share": 0.0
+  },
+  "frp n_det": {
+   "differ": 0,
+   "checked": 9006822,
+   "share": 0.0
+  },
+  "frp night share": {
+   "differ": 0,
+   "checked": 9006822,
+   "share": 0.0
+  },
+  "fuel age": {
+   "differ": 0,
+   "checked": 9006822,
+   "share": 0.0
+  },
+  "age_px causal": {
+   "differ": 0,
+   "checked": 168821,
+   "share": 0.0
+  },
+  "downwind zero without fire": {
+   "differ": 0,
+   "checked": 90,
+   "share": 0.0
+  }
+ },
+ "2020": {
+  "target": {
+   "differ": 6,
+   "checked": 9147687,
+   "share": 6.559035087230247e-07
+  },
+  "hist lag3": {
+   "differ": 4,
+   "checked": 9147687,
+   "share": 4.3726900581534983e-07
+  },
+  "hist lag4": {
+   "differ": 5,
+   "checked": 9147687,
+   "share": 5.465862572691873e-07
+  },
+  "hist lag5": {
+   "differ": 11,
+   "checked": 9147687,
+   "share": 1.202489765992212e-06
+  },
+  "hist lag3 shifted +1 (control)": {
+   "differ": 7267,
+   "checked": 9147687,
+   "share": 0.0007944084663150367
+  },
+  "distance": {
+   "differ": 0,
+   "checked": 9147687,
+   "share": 0.0
+  },
+  "frp sum": {
+   "differ": 0,
+   "checked": 9147687,
+   "share": 0.0
+  },
+  "frp n_det": {
+   "differ": 0,
+   "checked": 9147687,
+   "share": 0.0
+  },
+  "frp night share": {
+   "differ": 0,
+   "checked": 9147687,
+   "share": 0.0
+  },
+  "fuel age": {
+   "differ": 0,
+   "checked": 9147687,
+   "share": 0.0
+  },
+  "age_px causal": {
+   "differ": 0,
+   "checked": 222565,
+   "share": 0.0
+  },
+  "downwind zero without fire": {
+   "differ": 0,
+   "checked": 90,
+   "share": 0.0
+  }
+ }
+}

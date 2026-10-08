@@ -149,7 +149,8 @@ def main():
         use_frp=os.environ.get("USE_FRP", "0") == "1",
         use_barra_uv=os.environ.get("USE_BARRA_UV", "0") == "1",
         use_wind_align=os.environ.get("USE_WIND_ALIGN", "0") == "1",
-        slow_veg=os.environ.get("SLOW_VEG", "lai"),
+        slow_veg=os.environ.get("SLOW_VEG", "lai500"),
+        causal_inputs=os.environ.get("CAUSAL_INPUTS", "1") == "1",
         use_fast_ndvi=os.environ.get("USE_FAST_NDVI", "0") == "1",
         compact_statics=os.environ.get("COMPACT_STATICS", "0") == "1",
     )
@@ -181,7 +182,7 @@ def main():
         # un-truncating the fire-distance features, not CNN receptive field).
         kernel_size=(int(os.environ.get("KERNEL_SIZE", 5)), int(os.environ.get("KERNEL_SIZE", 5))),
         dilation=int(os.environ.get("DILATION", 1)),
-        lr=3e-4,
+        lr=float(os.environ.get("LR", 3e-4)),
         weight_decay=float(os.environ.get("WEIGHT_DECAY", 1e-2)),
         seq_len=fast_days,     # deep supervision runs on the fast (daily) axis
         use_recency_weights=False,

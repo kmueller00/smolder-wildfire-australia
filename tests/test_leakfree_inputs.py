@@ -1,7 +1,7 @@
 """Leak checks for the slow-branch window and the past-fire loss weight.
 
 Needs the data cubes (SMOLDER_DATA), cube_slow_8day.zarr,
-fire_dist30_continental.zarr and checkpoints/smolder_swa.ckpt. Runs with
+fire_dist30_continental.zarr and checkpoints/smolder_v1_swa.ckpt. Runs with
 pytest or directly: python tests/test_leakfree_inputs.py
 """
 import os
@@ -61,7 +61,7 @@ def test_past_dist_index():
 
 def test_past_fire_weight_off_is_identity_and_on_is_correct():
     from smolder.models.conv_lstm_lit_dual import ConvLSTMLitDual
-    m = ConvLSTMLitDual.load_from_checkpoint(os.path.join(REPO, "checkpoints", "smolder_swa.ckpt"),
+    m = ConvLSTMLitDual.load_from_checkpoint(os.path.join(REPO, "checkpoints", "smolder_v1_swa.ckpt"),
                                              map_location="cpu").eval()
     g = torch.Generator().manual_seed(0)
     logits = torch.randn(2, 32, 32, generator=g)

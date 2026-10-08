@@ -1,0 +1,142 @@
+{
+ "year": 2020,
+ "run_dir": "results/experiments/smolder/causal_b_50ep_seed123/test_2020",
+ "sources": {
+  "adaptive": "adaptive_budget_2020.json: adaptive_best",
+  "bands": "operating_point_2020.json: bands.fire_share",
+  "national": "national_2020.json",
+  "persistence": "national_2020_persistence.json"
+ },
+ "fire_share_by_band": {
+  "0-3 km": 0.38554944968512234,
+  "3-10 km": 0.19783937831984857,
+  "> 10 km": 0.41661117199502906
+ },
+ "caught_by_band": {
+  "SMOLDER.f1": {
+   "recall": 0.20993372100949614,
+   "recall_from_bands": 0.20993372100949612,
+   "share_of_caught": {
+    "0-3 km": 0.9532548627806051,
+    "3-10 km": 0.044191201723438135,
+    "> 10 km": 0.0025539354959567893
+   }
+  },
+  "SMOLDER.f2": {
+   "recall": 0.3047457120534427,
+   "recall_from_bands": 0.30474571205344264,
+   "share_of_caught": {
+    "0-3 km": 0.911176017653815,
+    "3-10 km": 0.08126174877726686,
+    "> 10 km": 0.007562233568918274
+   }
+  },
+  "persistence.f1": {
+   "recall": 0.22960767451981814,
+   "recall_from_bands": 0.22960767451981814,
+   "share_of_caught": {
+    "0-3 km": 1.0,
+    "3-10 km": 0.0,
+    "> 10 km": 0.0
+   }
+  },
+  "persistence.f2": {
+   "recall": 0.27765469904409334,
+   "recall_from_bands": 0.27765469904409334,
+   "share_of_caught": {
+    "0-3 km": 1.0,
+    "3-10 km": 0.0,
+    "> 10 km": 0.0
+   }
+  }
+ },
+ "ratios": {
+  "pooled_auc_pr": 3.3386501525922814,
+  "precision_f2": 2.166711165232691,
+  "auc_pr_over_base_rate_SMOLDER": 380.9113314459359,
+  "auc_pr_over_base_rate_persistence": 114.09141839859407,
+  "area_f2_SMOLDER_over_persistence": 0.5065607712214675,
+  "precision_f2_over_base_rate_SMOLDER": 431.1764609633282,
+  "precision_f2_over_base_rate_persistence": 199.00043341357068
+ },
+ "within_10km": {
+  "share_of_all_fire": 0.5833888280049709,
+  "recall_SMOLDER_f2": 0.5184212300294362,
+  "recall_persistence_f2": 0.47593420668269554
+ },
+ "f2_hindsight": {
+  "SMOLDER": {
+   "f2_best_on_sweep": 0.24471473830135904,
+   "mean_share_there": 0.0006536854061960259,
+   "f2_at_threshold_used": 0.2444651444911399
+  },
+  "persistence": {
+   "f2_best_on_sweep": 0.16511389471563814,
+   "mean_share_there": 0.0013952467051519442,
+   "f2_at_threshold_used": 0.16511389471563814
+  }
+ },
+ "decline_from_2019": {
+  "note": "fire caught = sum over distance bands of (catch rate in the band x share of fire in the band); the change from 2019 is split into the change of the shares (mix of near and far fire) and the change of the catch rates. The split depends on the order, so both orders are given. Uses the existing 2019 result files only.",
+  "fire_share_2019": {
+   "0-3 km": 0.46284220654658664,
+   "3-10 km": 0.21139661945590155,
+   "> 10 km": 0.32576117399751175
+  },
+  "fire_share_2020": {
+   "0-3 km": 0.38554944968512234,
+   "3-10 km": 0.19783937831984857,
+   "> 10 km": 0.41661117199502906
+  },
+  "SMOLDER": {
+   "recall_2019": 0.39847795843573225,
+   "recall_2020": 0.30474571205344264,
+   "change": -0.09373224638228961,
+   "rates_2019": {
+    "0-3 km": 0.7849370709003396,
+    "3-10 km": 0.15680547351484161,
+    "> 10 km": 0.006224822626654093
+   },
+   "rates_2020": {
+    "0-3 km": 0.720211076770335,
+    "3-10 km": 0.12517310610327395,
+    "> 10 km": 0.005531676557396651
+   },
+   "recall_with_2020_rates_and_2019_mix": 0.361607260878214,
+   "recall_with_2019_rates_and_2020_mix": 0.3362476837703551,
+   "mix_effect": {
+    "rates_changed_first": -0.056861548824771346,
+    "mix_changed_first": -0.06223027466537717
+   },
+   "rate_effect": {
+    "rates_changed_first": -0.03687069755751826,
+    "mix_changed_first": -0.031501971716912436
+   }
+  },
+  "persistence": {
+   "recall_2019": 0.3330795065239108,
+   "recall_2020": 0.27765469904409334,
+   "change": -0.05542480747981743,
+   "rates_2019": {
+    "0-3 km": 0.7196394404242501,
+    "3-10 km": 0.0,
+    "> 10 km": 0.0
+   },
+   "rates_2020": {
+    "0-3 km": 0.7201532754640255,
+    "3-10 km": 0.0,
+    "> 10 km": 0.0
+   },
+   "recall_with_2020_rates_and_2019_mix": 0.3333173310675214,
+   "recall_with_2019_rates_and_2020_mix": 0.27745659022727903,
+   "mix_effect": {
+    "rates_changed_first": -0.05566263202342808,
+    "mix_changed_first": -0.05562291629663174
+   },
+   "rate_effect": {
+    "rates_changed_first": 0.00023782454361065408,
+    "mix_changed_first": 0.00019810881681431303
+   }
+  }
+ }
+}

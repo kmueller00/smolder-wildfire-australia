@@ -23,8 +23,17 @@ hold-out year, fixed seed) and the released model.
      false_alarm  in the top 1 %, did not burn
      miss         burned, not in the top 1 %
      background   neither (random land pixels)
+   cls_n holds the number of pixels of the class in the patch, so the sample
+   can be weighted back to the true class mix (weight cls_n / pixels drawn).
 
-Outputs (working directory): explain_<year>.json, explain_<year>_pixels.csv.gz
+Selection: by default the top 1 % of each patch's land. With
+THRESHOLD_FROM=<adaptive_budget json of 2019> the selection is instead every
+pixel above the adaptive score threshold chosen on 2019 (THRESHOLD_CRIT f2,
+default, or f1): the same rule as the national adaptive evaluation, so the
+flagged area varies from patch to patch. "top 1 %" above then reads "flagged".
+
+Outputs (working directory): explain_<year><OUT_TAG>.json and
+explain_<year><OUT_TAG>_pixels.csv.gz (OUT_TAG default empty).
 EVAL_YEAR (default 2020) selects the year; USE_VPD_ANOMALY=1 adds the VPD
 anomaly channel (last fast channel) as its own input group.
 
@@ -44,11 +53,17 @@ from smolder.data.zarr_dual_datamodule import (check_checkpoint_inputs, CH, FAST
 from smolder.evaluation.evaluate_national import ap_auc
 from smolder.models.conv_lstm_lit_dual import ConvLSTMLitDual
 
-CKPT = os.environ.get("CKPT", "checkpoints/smolder_swa.ckpt")
+CKPT = os.environ.get("CKPT", "checkpoints/smolder_causal_swa.ckpt")
 N_PATCH = int(os.environ.get("N_PATCH", 1500))
 N_FOLD = 5
 PATCH = 384
 TOP = 0.01
+THRESHOLD_FROM = os.environ.get("THRESHOLD_FROM")
+THRESHOLD_CRIT = os.environ.get("THRESHOLD_CRIT", "f2")
+# adaptive threshold (logit of the score) fixed on another year, see the docstring
+THRESHOLD = (json.load(open(THRESHOLD_FROM))["adaptive_best"]["SMOLDER"][THRESHOLD_CRIT]["threshold"]
+             if THRESHOLD_FROM else None)
+OUT_TAG = os.environ.get("OUT_TAG", "")
 PER_CLASS = int(os.environ.get("PER_CLASS", 60))
 NEG_FRAC = 0.02
 SEED = 21
@@ -92,7 +107,8 @@ def main():
         ("soil moisture", [("s", [sl["SM"]])], None),
         ("precipitation", [("s", [sl["PPT"]])], None),
         ("vapour pressure deficit", [("f", [fa["VPD"]])], None),
-        ("land surface temperature", [("f", [fa["LST"]])], None),
+        ("maximum air temperature" if getattr(ds, "causal", False) else "land surface temperature",
+         [("f", [fa["LST"]])], None),                      # causal_inputs: BARRA-C2 tasmax in the LST slot
         ("wind speed", [("f", [fa["WIND"]])], None),
         ("fire history", [("f", list(range(fh0, fh0 + ds.n_fire_hist_channels)))], None),
         ("biomass", [("s", [len(SLOW_CHANNELS)]), ("f", [len(FAST_CHANNELS)])], None),
@@ -136,6 +152,8 @@ def main():
                                                    xc[None].to(device))[:, -1])[0].cpu().numpy()
 
     def top_mask(p, land):
+        if THRESHOLD is not None:              # p >= sigmoid(threshold), as in adaptive_budget.py
+            return land & (p >= 1.0 / (1.0 + np.exp(-THRESHOLD)))
         v = p[land]
         k = max(1, int(round(TOP * v.size)))
         return land & (p >= np.partition(v, -k)[-k])
@@ -145,6 +163,7 @@ def main():
     pool = {"base": dict(s=[], y=[], w=[], clim=[], lc=[], pid=[])}
     pool.update({n: dict(s=[]) for n in names})
     rows = []
+    flagged_share = []
     kept = 0
     for i in range(N_PATCH * 3):
         if kept >= N_PATCH:
@@ -161,6 +180,7 @@ def main():
         lcov = np.vectorize(lambda k: LANDCOVER.get(int(k), "other"))(lcode)
         p0 = predict(xs, xf, xc)
         t0 = top_mask(p0, land)
+        flagged_share.append(float(t0.sum() / land.sum()))
 
         neg = land & ~y & (rng.random(land.shape) < NEG_FRAC)
         keep = y | neg
@@ -215,14 +235,17 @@ def main():
                     vpd = denorm(fast[:, a, c, fa["VPD"]], "VPD")
                 d = fast[-1, a, c, fh0 + ds.n_fire_hist_channels - 1]
                 rows.append(dict(
-                    cls=cname, date=date, patch=kept - 1, climate=clim[a, c], landcover=lcov[a, c],
+                    cls=cname, cls_n=int(yy.size),       # pixels of this class in the patch (sampling weight)
+                    date=date, patch=kept - 1, climate=clim[a, c], landcover=lcov[a, c],
                     risk=float(p0[a, c]),
                     recent_fire=int(fast[-1, a, c, fh0:fh0 + 3].max() > 0.5),
                     dist_recent_fire_km=float(-5.0 * np.log(d)) if d > 1e-6 else np.nan,
                     soil_moisture=float(sm_traj[-1]), lai=float(lai_traj[-1]),
                     precip_32d=float(ppt_traj[-4:].sum()),
                     vpd_7d=float(vpd[-7:].mean()),
-                    lst_7d=float(denorm(fast[-7:, a, c, fa["LST"]], "LST").mean()),
+                    **({"tmax_7d": float((fast[-7:, a, c, fa["LST"]] * ds.barra_stats["tasmax"][1]
+                                          + ds.barra_stats["tasmax"][0]).mean())} if getattr(ds, "causal", False)
+                       else {"lst_7d": float(denorm(fast[-7:, a, c, fa["LST"]], "LST").mean())}),
                     wind_7d=float(denorm(fast[-7:, a, c, fa["WIND"]], "WIND").mean()),
                     biomass=float(slow[-1, a, c, len(SLOW_CHANNELS)] * ds.agb_std + ds.agb_mean),
                     **{f"sm_b{k:02d}": float(v) for k, v in enumerate(sm_traj)},
@@ -254,7 +277,8 @@ def main():
                 for key, (k, n) in patches[p]["cnt"][name].items():
                     a = acc.setdefault(key, [0, 0]); a[0] += k; a[1] += n
             ap1, _ = ap_auc(perm_s[name][m], base["y"][m], base["w"][m])
-            g = dict(retention=acc["all"][0] / max(acc["all"][1], 1), ap_drop=(ap0 - ap1) / ap0,
+            k_all, n_all = acc.get("all", (0, 0))          # a fold can hold no flagged pixel
+            g = dict(retention=k_all / n_all if n_all else float("nan"), ap_drop=(ap0 - ap1) / ap0,
                      by_climate={k[5:]: v[0] / v[1] for k, v in acc.items() if k.startswith("clim:") and v[1] >= 100},
                      by_landcover={k[3:]: v[0] / v[1] for k, v in acc.items() if k.startswith("lc:") and v[1] >= 100},
                      ap_drop_by_climate={})
@@ -268,7 +292,13 @@ def main():
         return ap0, res
 
     ap0, allres = stats_for(range(npat))
-    out = dict(checkpoint=os.path.basename(CKPT), n_patches=npat, top_fraction=TOP, n_fold=N_FOLD,
+    out = dict(checkpoint=os.path.basename(CKPT), n_patches=npat,
+               selection=(f"adaptive threshold {THRESHOLD_CRIT} from {THRESHOLD_FROM} (logit {THRESHOLD})"
+                          if THRESHOLD is not None else f"top {100 * TOP:g} % of each patch's land"),
+               top_fraction=None if THRESHOLD is not None else TOP,
+               flagged_share_mean=float(np.mean(flagged_share)),
+               flagged_share_p5_p50_p95=[float(v) for v in np.percentile(flagged_share, [5, 50, 95])],
+               n_fold=N_FOLD,
                base_auc_pr=ap0, groups=allres, folds={})
     for kind in ("time", "space"):
         per = [stats_for(np.flatnonzero(folds[kind] == f)) for f in range(N_FOLD)]
@@ -284,9 +314,9 @@ def main():
                             by_climate=[r[n]["by_climate"] for _, r in per],
                             by_landcover=[r[n]["by_landcover"] for _, r in per])
                     for n in names})
-    with open(f"explain_{EVAL_YEAR}.json", "w") as fh:
+    with open(f"explain_{EVAL_YEAR}{OUT_TAG}.json", "w") as fh:
         json.dump(out, fh, indent=1, default=float)
-    pd.DataFrame(rows).to_csv(f"explain_{EVAL_YEAR}_pixels.csv.gz", index=False)
+    pd.DataFrame(rows).to_csv(f"explain_{EVAL_YEAR}{OUT_TAG}_pixels.csv.gz", index=False)
     print(f"\nbase pooled AUC-PR {ap0:.4f} on {npat} patches")
     print(f"{'input group':26s} {'retention':>9s} {'time-fold sd':>12s} {'space-fold sd':>13s} {'AP drop':>8s}")
     for name in names:
@@ -294,7 +324,8 @@ def main():
         ft, fs = out["folds"]["time"]["groups"][name], out["folds"]["space"]["groups"][name]
         print(f"{name:26s} {g['retention']:9.3f} {np.std(ft['retention']):12.3f} {np.std(fs['retention']):13.3f} "
               f"{100*g['ap_drop']:7.1f}%   clim {g['by_climate']}")
-    print(f"wrote explain_{EVAL_YEAR}.json and explain_{EVAL_YEAR}_pixels.csv.gz ({len(rows)} pixels)")
+    print(f"flagged share of patch land: mean {np.mean(flagged_share):.4%}")
+    print(f"wrote explain_{EVAL_YEAR}{OUT_TAG}.json and explain_{EVAL_YEAR}{OUT_TAG}_pixels.csv.gz ({len(rows)} pixels)")
 
 
 if __name__ == "__main__":

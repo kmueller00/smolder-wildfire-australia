@@ -1,0 +1,50 @@
+{
+ "train": {
+  "final_by_issue_year": {
+   "2015": 190,
+   "2016": 366,
+   "2017": 365,
+   "2018": 362
+  },
+  "earlier_rules_by_issue_year": {
+   "2015": 214,
+   "2016": 366,
+   "2017": 365,
+   "2018": 364
+  },
+  "n_final": 1283,
+  "n_earlier": 1309,
+  "lost_to_target_window_rule": 2,
+  "lost_to_lai_delay": 24,
+  "first_issue_day": "2015-06-25",
+  "last_issue_day": "2018-12-28"
+ },
+ "validation": {
+  "final_by_issue_year": {
+   "2019": 349
+  },
+  "earlier_rules_by_issue_year": {
+   "2019": 351
+  },
+  "n_final": 349,
+  "n_earlier": 351,
+  "lost_to_target_window_rule": 2,
+  "lost_to_lai_delay": 0,
+  "first_issue_day": "2019-01-14",
+  "last_issue_day": "2019-12-28"
+ },
+ "test": {
+  "final_by_issue_year": {
+   "2020": 349
+  },
+  "earlier_rules_by_issue_year": {
+   "2020": 349
+  },
+  "n_final": 349,
+  "n_earlier": 349,
+  "lost_to_target_window_rule": 0,
+  "lost_to_lai_delay": 0,
+  "first_issue_day": "2020-01-14",
+  "last_issue_day": "2020-12-27"
+ }
+}

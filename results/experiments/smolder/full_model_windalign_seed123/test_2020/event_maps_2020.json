@@ -1,0 +1,134 @@
+{
+ "budget": 0.0013,
+ "adaptive_logit_threshold": 0.23799999999999955,
+ "events": {
+  "well 1": {
+   "date": "2020-11-21",
+   "fire_px": 526,
+   "persistence": {
+    "caught": 0.188212927756654,
+    "false_alarms": 554
+   },
+   "full": {
+    "caught": 0.7661596958174905,
+    "false_alarms": 355
+   },
+   "full_adaptive": {
+    "caught": 0.8460076045627376,
+    "false_alarms": 539
+   }
+  },
+  "well 2": {
+   "date": "2020-08-28",
+   "fire_px": 418,
+   "persistence": {
+    "caught": 0.23205741626794257,
+    "false_alarms": 870
+   },
+   "full": {
+    "caught": 0.8373205741626795,
+    "false_alarms": 911
+   },
+   "full_adaptive": {
+    "caught": 0.8827751196172249,
+    "false_alarms": 1233
+   }
+  },
+  "well 3": {
+   "date": "2020-07-14",
+   "fire_px": 609,
+   "persistence": {
+    "caught": 0.12151067323481117,
+    "false_alarms": 176
+   },
+   "full": {
+    "caught": 0.5779967159277504,
+    "false_alarms": 582
+   },
+   "full_adaptive": {
+    "caught": 0.5779967159277504,
+    "false_alarms": 580
+   }
+  },
+  "well 4": {
+   "date": "2020-11-16",
+   "fire_px": 477,
+   "persistence": {
+    "caught": 0.1949685534591195,
+    "false_alarms": 214
+   },
+   "full": {
+    "caught": 0.519916142557652,
+    "false_alarms": 284
+   },
+   "full_adaptive": {
+    "caught": 0.6519916142557652,
+    "false_alarms": 707
+   }
+  },
+  "poorly 1": {
+   "date": "2020-06-02",
+   "fire_px": 1504,
+   "persistence": {
+    "caught": 0.14029255319148937,
+    "false_alarms": 1531
+   },
+   "full": {
+    "caught": 0.25398936170212766,
+    "false_alarms": 2264
+   },
+   "full_adaptive": {
+    "caught": 0.23138297872340424,
+    "false_alarms": 1719
+   }
+  },
+  "poorly 2": {
+   "date": "2020-07-27",
+   "fire_px": 1366,
+   "persistence": {
+    "caught": 0.11493411420204978,
+    "false_alarms": 1159
+   },
+   "full": {
+    "caught": 0.13103953147877012,
+    "false_alarms": 1063
+   },
+   "full_adaptive": {
+    "caught": 0.13323572474377746,
+    "false_alarms": 1114
+   }
+  },
+  "poorly 3": {
+   "date": "2020-02-06",
+   "fire_px": 1065,
+   "persistence": {
+    "caught": 0.04507042253521127,
+    "false_alarms": 112
+   },
+   "full": {
+    "caught": 0.14553990610328638,
+    "false_alarms": 386
+   },
+   "full_adaptive": {
+    "caught": 0.020657276995305163,
+    "false_alarms": 90
+   }
+  },
+  "poorly 4": {
+   "date": "2020-05-09",
+   "fire_px": 983,
+   "persistence": {
+    "caught": 0.07222787385554426,
+    "false_alarms": 1232
+   },
+   "full": {
+    "caught": 0.14140386571719227,
+    "false_alarms": 1257
+   },
+   "full_adaptive": {
+    "caught": 0.11698880976602238,
+    "false_alarms": 919
+   }
+  }
+ }
+}

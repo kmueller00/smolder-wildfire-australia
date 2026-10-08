@@ -1,0 +1,41 @@
+{
+ "match_epochs": 9,
+ "runs": {
+  "without the new inputs": {
+   "metrics": "/home/saturn/gwgi/gwgi107h/wildfire_data/checkpoints/experiments/v2/baseline_v2_seed123/job_1830942/lightning_logs/version_0/metrics.csv",
+   "epochs": 14,
+   "best_val_ap": 0.1335013657808303,
+   "best_epoch": 10,
+   "best_val_ap_first": 0.1218014955520629,
+   "best_epoch_first": 8,
+   "val_ap_newfire": 0.0030280067585408,
+   "lift_top1": 24.76918846368789,
+   "lift_top5": 6.417129039764404,
+   "lift_top15": 2.5752800703048706
+  },
+  "without the new inputs and old loader": {
+   "metrics": "/home/saturn/gwgi/gwgi107h/wildfire_data/checkpoints/experiments/v2/baseline_v2_legacyloader_seed123/job_1830943/lightning_logs/version_0/metrics.csv",
+   "epochs": 9,
+   "best_val_ap": 0.0817440748214721,
+   "best_epoch": 5,
+   "best_val_ap_first": 0.0817440748214721,
+   "best_epoch_first": 5,
+   "val_ap_newfire": 0.0018492293311282,
+   "lift_top1": 22.68003225326538,
+   "lift_top5": 5.68412721157074,
+   "lift_top15": 2.31001873811086
+  },
+  "with the new inputs": {
+   "metrics": "/home/saturn/gwgi/gwgi107h/wildfire_data/checkpoints/experiments/v2/full_model_seed123/job_1831072/lightning_logs/version_0/metrics.csv",
+   "epochs": 30,
+   "best_val_ap": 0.1996930241584777,
+   "best_epoch": 23,
+   "best_val_ap_first": 0.1718420982360839,
+   "best_epoch_first": 7,
+   "val_ap_newfire": 0.0029548844322562,
+   "lift_top1": 24.873268604278557,
+   "lift_top5": 6.335508823394774,
+   "lift_top15": 2.572072744369507
+  }
+ }
+}

@@ -1,0 +1,120 @@
+"""Numbers the report derives from other result files, written to a file so that
+each one has a file and key.
+
+For YEAR (default 2019) and the run RUN (default the final model):
+  caught_by_band   at the best-F1 and best-F2 thresholds (adaptive_budget_<YEAR>.json,
+                   adaptive_best): the share of the fire caught that lies 0-3 km,
+                   3-10 km and more than 10 km from recent fire, from the recall per
+                   band and the share of all fire per band (operating_point_<YEAR>.json,
+                   bands.fire_share)
+  ratios           SMOLDER over persistence: pooled AUC-PR (national_<YEAR>.json and the
+                   persistence file), precision and flagged area at the best-F2 thresholds;
+                   pooled AUC-PR and precision over the base rate of the year, for both
+  within_10km      share of all fire within 10 km of recent fire, and the share of that
+                   fire caught at the best-F2 thresholds
+  f2_hindsight     the best F2 on the year's threshold sweep (adaptive_curve) against the
+                   F2 at the threshold used; a diagnostic of how well the 2019 threshold
+                   transfers, not a choice
+  decline_from_2019 (YEAR=2020 only) fire caught at the best-F2 threshold, 2019 against
+                   2020, split into the change of the mix of near and far fire and the
+                   change of the catch rates per distance band (existing 2019 files only)
+  common_days      (YEAR=2019 only) daily AUC-PR of the final model and of model B
+                   (earlier inputs) on the issue days both were evaluated on: mean of
+                   each, share of days on which the final model is higher
+
+  RUN_DIR=... PERSIST=... OUT=... python -m smolder.evaluation.report_derived
+"""
+import json
+import os
+
+import numpy as np
+import pandas as pd
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+RES = os.path.join(HERE, "..", "..", "results", "experiments")
+YEAR = int(os.environ.get("YEAR", 2019))
+RUN_DIR = os.environ.get("RUN_DIR", os.path.join(RES, "final", "causal_b_50ep_seed123")
+                         + ("" if YEAR == 2019 else "/../../smolder/causal_b_50ep_seed123/test_2020"))
+PERSIST = os.environ.get("PERSIST", os.path.join(RES, "final", f"persistence_{YEAR}",
+                                                 f"national_{YEAR}_persistence.json"))
+MODEL_B = os.path.join(RES, "smolder", "full_model_windalign_seed123", f"national_{YEAR}_daily.csv")
+OUT = os.environ.get("OUT", os.path.join(RUN_DIR, f"report_derived_{YEAR}.json"))
+BANDS = ["0-3 km", "3-10 km", "> 10 km"]
+
+
+def main():
+    ab = json.load(open(os.path.join(RUN_DIR, f"adaptive_budget_{YEAR}.json")))["adaptive_best"]
+    share = json.load(open(os.path.join(RUN_DIR, f"operating_point_{YEAR}.json")))["bands"]["fire_share"]
+    out = dict(year=YEAR, run_dir=os.path.relpath(RUN_DIR, os.path.join(HERE, "..", "..")),
+               sources=dict(adaptive=f"adaptive_budget_{YEAR}.json: adaptive_best",
+                            bands=f"operating_point_{YEAR}.json: bands.fire_share",
+                            national=f"national_{YEAR}.json", persistence=os.path.basename(PERSIST)),
+               fire_share_by_band=dict(zip(BANDS, share)), caught_by_band={})
+    for name in ("SMOLDER", "persistence"):
+        for crit in ("f1", "f2"):
+            b = ab[name][crit]
+            caught = np.array([b[f"recall {k}"] * s for k, s in zip(BANDS, share)])
+            out["caught_by_band"][f"{name}.{crit}"] = dict(
+                recall=b["recall"], recall_from_bands=float(caught.sum()),
+                share_of_caught=dict(zip(BANDS, (caught / caught.sum()).tolist())))
+    S = json.load(open(os.path.join(RUN_DIR, f"national_{YEAR}.json")))
+    P = json.load(open(PERSIST))
+    out["ratios"] = dict(pooled_auc_pr=S["pooled_auc_pr"] / P["pooled_auc_pr"],
+                         precision_f2=ab["SMOLDER"]["f2"]["precision"] / ab["persistence"]["f2"]["precision"],
+                         auc_pr_over_base_rate_SMOLDER=S["pooled_auc_pr"] / S["base_rate"],
+                         auc_pr_over_base_rate_persistence=P["pooled_auc_pr"] / P["base_rate"],
+                         area_f2_SMOLDER_over_persistence=ab["SMOLDER"]["f2"]["mean_share"]
+                         / ab["persistence"]["f2"]["mean_share"],
+                         precision_f2_over_base_rate_SMOLDER=ab["SMOLDER"]["f2"]["precision"] / S["base_rate"],
+                         precision_f2_over_base_rate_persistence=ab["persistence"]["f2"]["precision"] / P["base_rate"])
+    # the part of the fire that lies within 10 km of recent fire, and how much of it is caught
+    near = share[0] + share[1]
+    out["within_10km"] = dict(share_of_all_fire=near, **{
+        f"recall_{name}_f2": (ab[name]["f2"]["recall 0-3 km"] * share[0] + ab[name]["f2"]["recall 3-10 km"] * share[1]) / near
+        for name in ("SMOLDER", "persistence")})
+    # diagnostic, no choice: the best F2 on this year's threshold sweep against the F2
+    # of the threshold actually used (chosen on 2019); precision = 1 / (1 + fp_per_tp)
+    curve = json.load(open(os.path.join(RUN_DIR, f"adaptive_budget_{YEAR}.json")))["adaptive_curve"]
+    out["f2_hindsight"] = {}
+    for name in ("SMOLDER", "persistence"):
+        rec = np.array(curve[name]["recall"]); pre = 1.0 / (1.0 + np.array(curve[name]["fp_per_tp"]))
+        f2 = 5 * pre * rec / np.maximum(4 * pre + rec, 1e-12); i = int(np.nanargmax(f2))
+        out["f2_hindsight"][name] = dict(f2_best_on_sweep=float(f2[i]), mean_share_there=float(curve[name]["mean_share"][i]),
+                                        f2_at_threshold_used=ab[name]["f2"]["f2"])
+    if YEAR == 2020:                    # why fire caught at the best-F2 threshold differs from 2019
+        R19 = os.path.join(RES, "final", "causal_b_50ep_seed123")
+        ab19 = json.load(open(os.path.join(R19, "adaptive_budget_2019.json")))["adaptive_best"]
+        sh19 = np.array(json.load(open(os.path.join(R19, "operating_point_2019.json")))["bands"]["fire_share"])
+        sh20 = np.array(share)
+        out["decline_from_2019"] = dict(
+            note="fire caught = sum over distance bands of (catch rate in the band x share of fire in the "
+                 "band); the change from 2019 is split into the change of the shares (mix of near and far "
+                 "fire) and the change of the catch rates. The split depends on the order, so both orders "
+                 "are given. Uses the existing 2019 result files only.",
+            fire_share_2019=dict(zip(BANDS, sh19.tolist())), fire_share_2020=dict(zip(BANDS, sh20.tolist())))
+        for name in ("SMOLDER", "persistence"):
+            r19 = np.array([ab19[name]["f2"][f"recall {b}"] for b in BANDS])
+            r20 = np.array([ab[name]["f2"][f"recall {b}"] for b in BANDS])
+            c19, c20 = float(r19 @ sh19), float(r20 @ sh20)
+            rates20_mix19, rates19_mix20 = float(r20 @ sh19), float(r19 @ sh20)
+            out["decline_from_2019"][name] = dict(
+                recall_2019=c19, recall_2020=c20, change=c20 - c19,
+                rates_2019=dict(zip(BANDS, r19.tolist())), rates_2020=dict(zip(BANDS, r20.tolist())),
+                recall_with_2020_rates_and_2019_mix=rates20_mix19,
+                recall_with_2019_rates_and_2020_mix=rates19_mix20,
+                mix_effect=dict(rates_changed_first=c20 - rates20_mix19, mix_changed_first=rates19_mix20 - c19),
+                rate_effect=dict(rates_changed_first=rates20_mix19 - c19, mix_changed_first=c20 - rates19_mix20))
+    if YEAR == 2019 and os.path.exists(MODEL_B):
+        a = pd.read_csv(os.path.join(RUN_DIR, f"national_{YEAR}_daily.csv"))[["date", "auc_pr"]]
+        b = pd.read_csv(MODEL_B)[["date", "auc_pr"]]
+        j = a.merge(b, on="date", suffixes=("_final", "_model_B")).dropna()
+        out["common_days"] = dict(n_days=int(len(j)), n_days_final=int(len(a)), n_days_model_B=int(len(b)),
+                                  daily_auc_pr_mean_final=float(j.auc_pr_final.mean()),
+                                  daily_auc_pr_mean_model_B=float(j.auc_pr_model_B.mean()),
+                                  share_days_final_higher=float((j.auc_pr_final > j.auc_pr_model_B).mean()))
+    json.dump(out, open(OUT, "w"), indent=1)
+    print(json.dumps(out, indent=1))
+
+
+if __name__ == "__main__":
+    main()

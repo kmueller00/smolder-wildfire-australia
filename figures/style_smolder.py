@@ -10,6 +10,10 @@ document rather than a stitched-together set of one-off scripts:
 Figures with no cartesian axes (the architecture diagram, the input-channel
 panel) do not use this module; the rule is specifically about chart panels.
 """
+import glob
+import os
+
+import matplotlib.font_manager as _fm
 import matplotlib.pyplot as plt
 
 PANEL_BG = "#E9E9EC"
@@ -22,6 +26,19 @@ ACCENT2 = "#E07A1A"     # secondary series / highlight
 MUTED = "#8C8C90"       # de-emphasised reference lines
 
 FONT = "DejaVu Sans"
+
+# Report figures use Aptos. The font is not distributed with the repository
+# (Microsoft licence); set SMOLDER_FONT_DIR to a folder holding Aptos*.ttf
+# (Microsoft Aptos Fonts, download.microsoft.com) to draw with it. Without it
+# the figures keep matplotlib's default font.
+_font_dir = os.environ.get("SMOLDER_FONT_DIR", "")
+if _font_dir and glob.glob(os.path.join(_font_dir, "Aptos*.ttf")):
+    for _f in glob.glob(os.path.join(_font_dir, "Aptos*.ttf")):
+        _fm.fontManager.addfont(_f)
+    FONT = "Aptos"
+    plt.rcParams["font.family"] = FONT
+    plt.rcParams["mathtext.fontset"] = "custom"
+    plt.rcParams["mathtext.rm"] = FONT
 
 
 def style_axes(ax, grid_x=True, grid_y=True):

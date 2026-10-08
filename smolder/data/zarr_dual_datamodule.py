@@ -1,10 +1,12 @@
 """SMOLDER data pipeline: patches with a slow and a fast temporal window.
 
 For a target day t and a PATCH x PATCH window, each sample holds
-  x_slow  (18, H, W, C)  LAI, soil moisture, precipitation over 144 days in
-                         8-day bins (from the pre-binned cube_slow_8day.zarr),
-                         plus broadcast statics and day-of-year (sin, cos)
-  x_fast  (14, H, W, C)  VPD, land-surface temperature, wind over 14 days,
+  x_slow  (18, H, W, C)  LAI (HiQ-LAI 500 m), soil moisture, precipitation
+                         over 144 days in 8-day bins, plus broadcast statics
+                         and day-of-year (sin, cos)
+  x_fast  (14, H, W, C)  VPD, daily maximum air temperature (with
+                         causal_inputs; land-surface temperature without),
+                         wind over 14 days,
                          plus the same statics, day-of-year, and fire history
                          (fire at t-3, t-4, t-5 and exp(-distance/5 px) to fire
                          at t-3; nothing later than t-3 is ever read)
@@ -14,7 +16,10 @@ For a target day t and a PATCH x PATCH window, each sample holds
 
 All cubes are indexed on one continuous 2015-2020 day axis, so windows can
 cross year boundaries. Inputs are standardised with channel_stats_2015_2018.json
-(training years only). NDVI is present in the full cubes but not read.
+(training years only).
+
+causal_inputs (default on) restricts every input to what is known on the
+issue day; see DualPatchConfig.causal_inputs and tests/leak_audit_*.
 """
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -155,7 +160,7 @@ class DualPatchConfig:
     # Slow-branch window. Fixed (default): only 8-day bins that END on or
     # before the issue day D = t_end - 1 are used, so the newest bin is 0-7
     # days old. Legacy: every bin that STARTS on or before t_end, the
-    # behaviour the released checkpoint (smolder_swa.ckpt) was trained with;
+    # behaviour the first released checkpoint (smolder_v1_swa.ckpt) was trained with;
     # its newest bin always reaches past D, by 1-8 days and over the whole
     # target window on 75 % of issue days (results/slow_window_leak_check_2019.json).
     # Set SLOW_WINDOW_LEGACY=1 only to reproduce that checkpoint's results.
@@ -211,18 +216,15 @@ class DualPatchConfig:
     # upwind, 0 crosswind; 0 at burning pixels and without fire in the patch.
     # Uses no information after day s. Blanked by fire_history_dropout_prob.
     use_wind_align: bool = field(default_factory=lambda: os.environ.get("USE_WIND_ALIGN", "0") == "1")
-    # Vegetation in the slow branch: "lai" (HiQ-LAI 5 km, default), "ndvi"
-    # (MODIS 500 m NDVI from the cubes in place of LAI) or "lai+ndvi" (NDVI as
-    # an extra slow channel, appended last so no other channel moves). NDVI
-    # 8-day means on the slow cube's bins come from cube_slow_8day_ndvi.zarr
-    # (build_slow_cube with CHANNELS=NDVI).
-    slow_veg: str = field(default_factory=lambda: os.environ.get("SLOW_VEG", "lai"))
+    # Vegetation in the slow branch: HiQ-LAI 500 m averaged to 1 km
+    # (build_lai500_slow). The 5 km LAI of the cubes and the NDVI variants are
+    # no longer supported: both reach past the issue day.
+    slow_veg: str = field(default_factory=lambda: os.environ.get("SLOW_VEG", "lai500"))
     # MODIS 500 m NDVI from the daily cubes as one fast-branch channel (value of
     # each fast day: the newest 8-day composite), next to LAI in the slow
     # branch. Placed after the BARRA wind channels and before the VPD anomaly
     # and perfect-forecast channels; its position is self.fast_ndvi_idx.
     use_fast_ndvi: bool = field(default_factory=lambda: os.environ.get("USE_FAST_NDVI", "0") == "1")
-    ndvi_slow_store: str = "cube_slow_8day_ndvi.zarr"
     lai500_slow_store: str = "cube_slow_8day_lai500.zarr"   # SLOW_VEG=lai500 (build_lai500_slow)
     # Read y_fire_3d, fuel age, FRP, BARRA vpd/uas/vas and (SLOW_VEG=lai500)
     # the slow bins from the time-blocked copies of smolder.data.build_fast_stores:
@@ -242,6 +244,29 @@ class DualPatchConfig:
     # inserts them again on the GPU at the same channel positions. Training only
     # (DualDataModule); a dataset used directly keeps the full layout.
     compact_statics: bool = False
+    # Inputs restricted to what is known on the issue day (leak audit of
+    # 2026-10-06, tests/leak_audit_fire.py and tests/leak_audit_event_study.py):
+    #   NDVI (fast)   the newest 8-day composite that has ended: the one shown on
+    #                 day s - 7 (a MOD09A1 composite is labelled by its first day)
+    #   temperature   BARRA-C2 daily maximum air temperature of day s in place of
+    #                 the MODIS LST, whose cloudy days are filled with a spline
+    #                 over the whole year (Zhang et al. 2022)
+    #   LAI (slow)    lai500_lag31_store: composites starting <= d - 31, past
+    #                 HiQ-LAI's smoothing over +-3 composites (Yan et al. 2024)
+    #   biomass       the CCI map of year Y-1 (2010 for 2015) for an issue day in
+    #                 year Y (agb_store); the cubes hold the 2015-2020 mean
+    #   land cover    the LC100 map of year max(Y-2, 2015) (landcover_store);
+    #                 each map uses three years of data, centred on its year
+    #   target        issue days whose 3-day target window leaves the split's
+    #                 own days are dropped (no labels of the next split)
+    # Off reproduces the earlier inputs, for checkpoints trained with them.
+    causal_inputs: bool = field(default_factory=lambda: os.environ.get("CAUSAL_INPUTS", "1") == "1")
+    ndvi_lag_days: int = 7
+    lai500_lag31_store: str = "cube_slow_8day_lai500_lag31.zarr"
+    slow_lai500m_lag31_store: str = "cube_slow_8day_lai500m_lag31.zarr"
+    barra_fast_tmax_store: str = "barra_c2_fast_tmax.zarr"           # vpd, uas, vas, tasmax
+    agb_store: str = "agb_yearly.zarr"
+    landcover_store: str = "landcover_yearly.zarr"
 
 
 def expand_compact(batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
@@ -310,7 +335,7 @@ def check_checkpoint_inputs(ckpt_path: str) -> None:
     for key, default in (("vpd_source", "montes"), ("use_vpd_anomaly", False), ("perfect_forecast", False),
                          ("use_frp", False), ("use_barra_uv", False), ("slow_veg", "lai"),
                          ("use_fast_ndvi", False), ("use_fuel_age", False), ("fuel_age_lookback", 250),
-                         ("use_wind_align", False)):
+                         ("use_wind_align", False), ("causal_inputs", False)):
         t = trained.get(key)
         t = default if t is None else t
         if key == "fuel_age_lookback" and not (trained.get("use_fuel_age") or False):
@@ -328,7 +353,7 @@ def check_checkpoint_inputs(ckpt_path: str) -> None:
     if diffs:
         raise ValueError(f"{ckpt_path} was trained with other inputs ({'; '.join(diffs)}); "
                          "set VPD_SOURCE / USE_VPD_ANOMALY / PERFECT_FORECAST / USE_FRP / USE_BARRA_UV / SLOW_VEG / "
-                         "USE_FAST_NDVI / USE_FUEL_AGE / FUEL_AGE_LOOKBACK / USE_WIND_ALIGN / USE_ELEVATION / USE_SLOPE_ASPECT / "
+                         "USE_FAST_NDVI / USE_FUEL_AGE / FUEL_AGE_LOOKBACK / USE_WIND_ALIGN / CAUSAL_INPUTS / USE_ELEVATION / USE_SLOPE_ASPECT / "
                          "USE_LIGHTNING / USE_WIND_DIR / USE_FFDI / USE_FMC to match")
 
 
@@ -358,9 +383,10 @@ class DualWindowDataset(Dataset):
         self.slow_cube = None
         if cfg.slow_cube_path:
             sc_path = cfg.slow_cube_path
-            if (getattr(cfg, "fast_stores", False) and getattr(cfg, "slow_veg", "lai") == "lai500"
-                    and not resolve(sc_path).exists()):
-                sc_path = cfg.slow_lai500m_store       # same bins and attributes, LAI at 500 m
+            merged = (cfg.slow_lai500m_lag31_store if getattr(cfg, "causal_inputs", False)
+                      else cfg.slow_lai500m_store)
+            if getattr(cfg, "fast_stores", False) and not resolve(sc_path).exists():
+                sc_path = merged                       # same bins and attributes, LAI at 500 m
             sc = open_zarr_root(sc_path)
             # Fail loudly on any mismatch: a silently wrong bin size or channel
             # order would corrupt training without ever raising.
@@ -407,34 +433,39 @@ class DualWindowDataset(Dataset):
         self.vpd_source = str(getattr(cfg, "vpd_source", "montes"))
         self.perfect_forecast = bool(getattr(cfg, "perfect_forecast", False))
         assert self.vpd_source in ("montes", "barra"), self.vpd_source
-        self.slow_veg = str(getattr(cfg, "slow_veg", "lai"))
-        assert self.slow_veg in ("lai", "ndvi", "lai+ndvi", "lai500"), self.slow_veg
+        self.slow_veg = str(getattr(cfg, "slow_veg", "lai500"))
+        if self.slow_veg != "lai500":
+            raise ValueError(f"slow_veg={self.slow_veg!r}: only 'lai500' is supported (the 5 km LAI and the "
+                             "NDVI variants are no longer available)")
+        self.causal = bool(getattr(cfg, "causal_inputs", False))
         fast = bool(getattr(cfg, "fast_stores", False))   # inputs from build_fast_stores only
-        if self.slow_veg == "lai500":
-            # HiQ-LAI 500 m averaged to 1 km (build_lai500_slow) in place of the 5 km LAI
-            assert self.slow_cube is not None, "slow_veg needs the pre-binned slow cube"
-            self.lai500_slow = None                         # fast stores: merged slow store, opened below
-            if not fast:
-                lg = open_zarr_root(getattr(cfg, "lai500_slow_store", "cube_slow_8day_lai500.zarr"))
-                assert np.array_equal(np.asarray(lg["bin_start_day"][...]), self.slow_bin_start), "LAI500 bins differ"
-                self.lai500_slow = lg["X_slow"]
-        elif self.slow_veg != "lai":
-            assert self.slow_cube is not None, "slow_veg needs the pre-binned slow cube"
-            ng = open_zarr_root(getattr(cfg, "ndvi_slow_store", "cube_slow_8day_ndvi.zarr"))
-            assert np.array_equal(np.asarray(ng["bin_start_day"][...]), self.slow_bin_start), "NDVI bins differ"
-            self.ndvi_slow = ng["X_slow"]
+        # HiQ-LAI 500 m averaged to 1 km (build_lai500_slow) in place of the cube's LAI
+        assert self.slow_cube is not None, "slow_veg needs the pre-binned slow cube"
+        self.lai500_slow = None                             # fast stores: merged slow store, opened below
+        self.lai_first_full_bin = 0
+        lai_store = cfg.lai500_lag31_store if self.causal else cfg.lai500_slow_store
+        if fast:                       # the merged slow store holds the LAI and its attributes
+            lai_store = cfg.slow_lai500m_lag31_store if self.causal else cfg.slow_lai500m_store
+        lg = open_zarr_root(lai_store)
+        assert np.array_equal(np.asarray(lg["bin_start_day"][...]), self.slow_bin_start), "LAI500 bins differ"
+        if self.causal:
+            assert int(lg.attrs.get("lag_days", 0)) >= 31, (lai_store, lg.attrs.get("lag_days"))
+            self.lai_first_full_bin = int(lg.attrs["first_full_bin"])
+        if not fast:
+            self.lai500_slow = lg["X_slow"]
         self.use_frp = bool(getattr(cfg, "use_frp", False))
         self.use_barra_uv = bool(getattr(cfg, "use_barra_uv", False))
         self.use_wind_align = bool(getattr(cfg, "use_wind_align", False))
         if self.use_frp and not fast:                        # fast stores: frp_feat of the fire store
             self.firms = open_zarr_root(getattr(cfg, "firms_store", "firms_daily.zarr"))
-        if self.use_barra_uv and getattr(cfg, "augment", False):
-            raise ValueError("use_barra_uv carries absolute wind directions, which flips/rotations do not correct")
-        if self.vpd_source == "barra" or self.perfect_forecast or self.use_barra_uv or self.use_wind_align:
+        if self.causal and self.vpd_source != "barra":
+            raise ValueError("causal_inputs needs vpd_source='barra'")
+        if self.vpd_source == "barra" or self.perfect_forecast or self.use_barra_uv or self.use_wind_align or self.causal:
             # fast stores: grid and statistics from barra_c2_fast.zarr; the full store is
             # only needed for the variables it alone holds (perfect forecast, VPD climatology)
             only_fast = fast and not (self.perfect_forecast or getattr(cfg, "use_vpd_anomaly", False))
-            self.barra = open_zarr_root(cfg.barra_fast_store if only_fast
+            self.barra_fast_path = cfg.barra_fast_tmax_store if self.causal else cfg.barra_fast_store
+            self.barra = open_zarr_root(self.barra_fast_path if only_fast
                                         else getattr(cfg, "barra_store", "barra_c2_daily.zarr"))
             self.barra_lat = np.asarray(self.barra["lat"][...])
             self.barra_lon = np.asarray(self.barra["lon"][...])
@@ -496,7 +527,8 @@ class DualWindowDataset(Dataset):
         self.read_slow_idx = [cube_ch.get(c) for c in SLOW_CHANNELS]
         self.read_fast_idx = [cube_ch.get(c) for c in FAST_CHANNELS]
         missing = [c for c, i in zip(FAST_CHANNELS, self.read_fast_idx) if i is None]
-        if missing and not (missing == ["VPD"] and self.vpd_source == "barra"):
+        replaced = ({"VPD"} if self.vpd_source == "barra" else set()) | ({"LST"} if self.causal else set())
+        if missing and not set(missing) <= replaced:          # VPD and (causal) LST come from BARRA-C2
             raise ValueError(f"cube lacks fast-branch channels {missing}")
         if None in self.read_slow_idx and self.slow_cube is None:
             raise ValueError("cube lacks slow-branch channels and no pre-binned slow cube is given")
@@ -528,11 +560,25 @@ class DualWindowDataset(Dataset):
         # agb differs per year -> resolved per-sample in __getitem__.
         self.landmask = g0["landmask"][...].astype(np.uint8)
         self.landmask_f = self.landmask.astype(np.float32)
-        self.cat_stack = np.stack(
-            [g0["landcover"][...].astype(np.int64), g0["koppen_geiger"][...].astype(np.int64)],
-            axis=-1,
-        )
+        if self.causal:                       # land cover per year from landcover_store (below)
+            self.cat_stack = np.stack([np.zeros(g0["koppen_geiger"].shape, np.int64),
+                                       g0["koppen_geiger"][...].astype(np.int64)], axis=-1)
+        else:
+            self.cat_stack = np.stack(
+                [g0["landcover"][...].astype(np.int64), g0["koppen_geiger"][...].astype(np.int64)],
+                axis=-1,
+            )
         self._agb_cache: Dict[int, np.ndarray] = {}
+        if self.causal:
+            ag = open_zarr_root(cfg.agb_store)
+            self.agb_years = [int(y) for y in np.asarray(ag["years"][...])]
+            self.agb_maps = ag["agb"]
+            self.agb_mean, self.agb_std = float(ag.attrs["mean"]), float(ag.attrs["std"]) or 1.0
+            lc = open_zarr_root(cfg.landcover_store)
+            self.lc_years = [int(y) for y in np.asarray(lc["years"][...])]
+            self.lc_maps = lc["landcover"]
+            self.kg = self.cat_stack[..., 1].copy()
+            self.cat_stack = None
 
         # Lightning flash-density climatology (LIS/OTD HRFC, flashes/km^2/yr),
         # identical across years like landcover/koppen -> take from cube 0.
@@ -579,6 +625,13 @@ class DualWindowDataset(Dataset):
             self.slope = ((sl - self.slope_mean) / self.slope_std).astype(np.float32)
             self.aspect_sin = np.asarray(g0["aspect_sin"], dtype=np.float32)
             self.aspect_cos = np.asarray(g0["aspect_cos"], dtype=np.float32)
+            if self.causal:
+                # The cubes' aspect_cos is the SOUTH component of the downhill direction
+                # (build_aux_statics: bearing = atan2(-dZ/deast, -dZ/dsouth)); its negative is the
+                # north component, so (aspect_sin, aspect_cos) is the downhill (east, north) vector
+                # (cosine 0.997 with the elevation gradient; 0.148 before). Needed for the vector
+                # turns of _augment, and it makes the input what its name says.
+                self.aspect_cos = -self.aspect_cos
 
         # fuel_age: days since this pixel last had fire, leakage-free (window
         # ends at t_end-3, same cutoff as fire_hist_t-3), censored at
@@ -644,8 +697,8 @@ class DualWindowDataset(Dataset):
         self.compact = bool(getattr(cfg, "compact_statics", False))
         self.static_doy_width = (2 + int(self.use_lightning) + int(self.use_elevation)
                                  + 3 * int(self.use_slope_aspect) + (2 if getattr(cfg, "add_doy", True) else 0))
-        if self.compact and (getattr(cfg, "augment", False) or getattr(cfg, "vslow_days", 0)):
-            raise ValueError("compact_statics does not support augment or the very-slow branch")
+        if self.compact and getattr(cfg, "vslow_days", 0):
+            raise ValueError("compact_statics does not support the very-slow branch")
 
         # ---- time-blocked input stores (build_fast_stores) ----
         self.fire_y = self.frp_feat = self.barra_fast = None
@@ -663,15 +716,19 @@ class DualWindowDataset(Dataset):
             if self.use_frp:
                 self.frp_feat = fg["frp_feat"]
             if hasattr(self, "barra"):
-                bf = open_zarr_root(cfg.barra_fast_store)
-                assert list(bf.attrs["variables"]) == BARRA_FAST_VARS, bf.attrs["variables"]
+                bf = open_zarr_root(self.barra_fast_path)
+                self.barra_fast_vars = list(bf.attrs["variables"])
+                need = BARRA_FAST_VARS + (["tasmax"] if self.causal else [])
+                assert set(need) <= set(self.barra_fast_vars), (need, self.barra_fast_vars)
                 assert np.array_equal(np.asarray(bf["lat"][...]), self.barra_lat)
                 assert np.array_equal(np.asarray(bf["lon"][...]), self.barra_lon)
                 self.barra_fast = bf["x"]
                 # a store cut to part of the period records the global days it holds
                 self._barra_days = tuple(bf.attrs.get("days_present", (0, self.barra_fast.shape[0])))
             if self.slow_veg == "lai500":            # LAI500, SM, PPT in one array
-                sg = open_zarr_root(cfg.slow_lai500m_store)
+                sg = open_zarr_root(cfg.slow_lai500m_lag31_store if self.causal else cfg.slow_lai500m_store)
+                if self.causal:
+                    assert int(sg.attrs.get("lag_days", 0)) >= 31, sg.attrs.get("lag_days")
                 assert np.array_equal(np.asarray(sg["bin_start_day"][...]), self.slow_bin_start)
                 assert tuple(sg.attrs["channels"]) == tuple(SLOW_CHANNELS), sg.attrs["channels"]
                 self.slow_cube = sg["X_slow"]
@@ -695,6 +752,14 @@ class DualWindowDataset(Dataset):
                 if vt[lt] > 0:
                     ok.append(t)
             targets = np.asarray(ok)
+        if self.causal:
+            # the target of issue day t_end - 1 covers days t_end .. t_end + 2: keep it inside
+            # this split's own days, so no label of the next split enters training or validation
+            targets = targets[targets + 2 <= self.T_total - 1]
+            # the 144-day window must not reach LAI averages without a composite old enough
+            if self.slow_cube is not None and self.lai_first_full_bin > 0:
+                ends = np.array([self._slow_bin_end(int(t)) for t in targets])
+                targets = targets[ends - self.t_slow >= self.lai_first_full_bin]
         if targets.size == 0:
             raise ValueError("No valid target days")
         self.targets = targets
@@ -710,6 +775,58 @@ class DualWindowDataset(Dataset):
         """Global day -> (cube index, local day)."""
         i = int(np.searchsorted(self.offsets, t, side="right") - 1)
         return i, t - int(self.offsets[i])
+
+    def _issue_year(self, t_end: int) -> int:
+        import datetime as _dt
+        return (_dt.date(2015, 1, 1) + _dt.timedelta(days=int(t_end - 1 + self.cfg.day_offset))).year
+
+    def _agb_causal(self, t_end: int, y0: int, x0: int) -> np.ndarray:
+        """Normalized biomass map of the year before the issue day's year (2010 for 2015)."""
+        y = self._issue_year(t_end) - 1
+        if y not in self.agb_years:
+            y = max(v for v in self.agb_years if v < y)
+        a = np.asarray(self.agb_maps[self.agb_years.index(y), y0:y0 + self.ph, x0:x0 + self.pw], np.float32)
+        return np.nan_to_num((a - self.agb_mean) / self.agb_std, nan=0.0, posinf=0.0, neginf=0.0)
+
+    def _cat_causal(self, t_end: int, y0: int, x0: int) -> np.ndarray:
+        """Land cover of year max(Y-2, 2015) for an issue day in year Y, and the Koppen class."""
+        y = max(self._issue_year(t_end) - 2, self.lc_years[0])
+        lc = np.asarray(self.lc_maps[self.lc_years.index(y), y0:y0 + self.ph, x0:x0 + self.pw]).astype(np.int64)
+        return np.stack([lc, self.kg[y0:y0 + self.ph, x0:x0 + self.pw]], axis=-1)
+
+    def _ndvi_causal(self, t_end: int, y0: int, x0: int) -> np.ndarray:
+        """Raw NDVI of fast steps s = t_end - T .. t_end - 1 as shown on day s - ndvi_lag_days:
+        the newest composite whose 8 days have all passed by day s. Read from the daily cube
+        of whichever year holds that day."""
+        lag = int(self.cfg.ndvi_lag_days)
+        g = np.arange(t_end - self.t_fast, t_end) + int(self.cfg.day_offset) - lag
+        if self.ndvi_comp is not None:
+            comp = self.ndvi_day_to_comp[g]
+            if (comp < 0).any():
+                raise ValueError(f"no NDVI composite for global days {g[comp < 0].tolist()}")
+            planes = {c: np.asarray(self.ndvi_comp[c, y0:y0 + self.ph, x0:x0 + self.pw], np.float32)
+                      for c in np.unique(comp)}
+            return np.stack([planes[c] for c in comp])
+        import datetime as _dt
+        if not hasattr(self, "_ndvi_cubes"):
+            self._ndvi_cubes = {}
+        out = np.zeros((len(g), self.ph, self.pw), np.float32)
+        by_year = {}
+        for k, gd in enumerate(g):
+            d = _dt.date(2015, 1, 1) + _dt.timedelta(days=int(gd))
+            by_year.setdefault(d.year, []).append((k, d.timetuple().tm_yday - 1))
+        for year, kd in by_year.items():
+            if year not in self._ndvi_cubes:
+                gy = open_zarr_root(daily_cube(year))
+                names = gy.attrs.get("channels")
+                ch = list(names).index("ndvi") if names else CH["NDVI"]
+                self._ndvi_cubes[year] = (gy["X"], ch)
+            X, ch = self._ndvi_cubes[year]
+            lo, hi = min(d for _, d in kd), max(d for _, d in kd)
+            blk = np.asarray(X[lo:hi + 1, y0:y0 + self.ph, x0:x0 + self.pw, ch], np.float32)
+            for k, d in kd:
+                out[k] = blk[d - lo]
+        return out
 
     def _agb(self, ci: int) -> np.ndarray:
         """Normalized agb for the cube owning the target day (agb is per-year)."""
@@ -847,7 +964,7 @@ class DualWindowDataset(Dataset):
     def _barra_patch(self, var: str, gdays, y0: int, x0: int) -> np.ndarray:
         """BARRA-C2 `var` for global days `gdays`, bilinearly interpolated to the
         patch, (len(gdays), H, W) float32."""
-        if self.barra_fast is not None and var in BARRA_FAST_VARS:
+        if self.barra_fast is not None and var in getattr(self, "barra_fast_vars", BARRA_FAST_VARS):
             return self._barra_patch_fast(var, gdays, y0, x0)
         from scipy.ndimage import map_coordinates
         c0, a, f0, e = self._GT
@@ -901,7 +1018,8 @@ class DualWindowDataset(Dataset):
                             self._linear_weights(fj - k0, win.shape[2]), fi - r0, fj - k0)
             self._bcache_key = key
         win, Ar, Ak, fi, fj = self._bcache
-        w = win[[g - gdays[0] for g in gdays], :, :, BARRA_FAST_VARS.index(var)]
+        vi = (self.barra_fast_vars if hasattr(self, "barra_fast_vars") else BARRA_FAST_VARS).index(var)
+        w = win[[g - gdays[0] for g in gdays], :, :, vi]
         if not np.isfinite(w).all():                 # a product would spread a NaN over the whole patch
             from scipy.ndimage import map_coordinates
             FI, FJ = np.meshgrid(fi, fj, indexing="ij")
@@ -1019,8 +1137,8 @@ class DualWindowDataset(Dataset):
             + (["elevation"] if self.use_elevation else []) \
             + (["slope", "aspect", "aspect"] if self.use_slope_aspect else [])
         doy = ["day of year"] * (2 if getattr(cfg, "add_doy", True) else 0)
-        slow = list(SLOW_CHANNELS) + stat + doy + (["NDVI (slow)"] if self.slow_veg == "lai+ndvi" else [])
-        fast = list(FAST_CHANNELS) + stat + doy
+        slow = list(SLOW_CHANNELS) + stat + doy
+        fast = [("TMAX" if (c == "LST" and self.causal) else c) for c in FAST_CHANNELS] + stat + doy
         if getattr(cfg, "fire_history", False):
             fast += ["fire history"] * self.n_fire_hist_channels
         fast += ["fuel age"] * int(self.use_fuel_age) + ["wind direction (BARRA2)"] * int(self.use_wind_dir) \
@@ -1082,17 +1200,10 @@ class DualWindowDataset(Dataset):
             ).astype(np.float32)
         x_slow = np.nan_to_num(x_slow, nan=0.0, posinf=0.0, neginf=0.0)
         x_slow = (x_slow - self.slow_mean[None, None, None, :]) / self.slow_std[None, None, None, :]
-        ndvi_slow = None
-        if self.slow_veg == "lai500":                               # same bins, same LAI normalization
-            if self.lai500_slow is not None:                        # (fast stores: already channel 0)
-                il = SLOW_CHANNELS.index("LAI")
-                lv = np.asarray(self.lai500_slow[b_lo:b_end, y0:y0 + self.ph, x0:x0 + self.pw, 0], np.float32)
-                x_slow[..., il] = (np.nan_to_num(lv) - self.slow_mean[il]) / self.slow_std[il]
-        elif self.slow_veg != "lai":                                # same bins b_lo..b_end as x_slow
-            nd = np.asarray(self.ndvi_slow[b_lo:b_end, y0:y0 + self.ph, x0:x0 + self.pw, 0], np.float32)
-            ndvi_slow = (np.nan_to_num(nd) - self.x_mean_all[CH["NDVI"]]) / self.x_std_all[CH["NDVI"]]
-            if self.slow_veg == "ndvi":
-                x_slow[..., SLOW_CHANNELS.index("LAI")] = ndvi_slow
+        if self.lai500_slow is not None:                            # same bins, same LAI normalization
+            il = SLOW_CHANNELS.index("LAI")                         # (fast stores: already channel 0)
+            lv = np.asarray(self.lai500_slow[b_lo:b_end, y0:y0 + self.ph, x0:x0 + self.pw, 0], np.float32)
+            x_slow[..., il] = (np.nan_to_num(lv) - self.slow_mean[il]) / self.slow_std[il]
 
         # ---- very-slow branch: year-scale accumulated drought ----
         x_vslow = None
@@ -1116,7 +1227,10 @@ class DualWindowDataset(Dataset):
 
         # ---- fast branch: daily ----
         ndvi_raw = None
-        if self.use_fast_ndvi and self.ndvi_comp is None:         # NDVI in the same pass over the cube
+        if self.use_fast_ndvi and self.causal:                    # completed composites only
+            x_fast = self._read_span(t_end, cfg.fast_days, self.read_fast_idx)
+            ndvi_raw = self._ndvi_causal(t_end, y0, x0)
+        elif self.use_fast_ndvi and self.ndvi_comp is None:       # NDVI in the same pass over the cube
             xr = self._read_span(t_end, cfg.fast_days, self.read_fast_idx + [self.read_ndvi_idx])
             x_fast, ndvi_raw = xr[..., :-1], xr[..., -1]
         elif self.use_fast_ndvi:                                   # cube without NDVI: composite store
@@ -1140,6 +1254,12 @@ class DualWindowDataset(Dataset):
                 * self.fast_std[iv] + self.fast_mean[iv]          # undone by the normalization below
             if self.use_vpd_anomaly:
                 vpd_raw = np.nan_to_num(bv)
+        if self.causal:                                           # BARRA-C2 tmax of day s in the LST slot
+            it = FAST_CHANNELS.index("LST")
+            g0 = t_end - self.t_fast + int(cfg.day_offset)
+            bt = self._barra_patch("tasmax", range(g0, g0 + self.t_fast), y0, x0)
+            x_fast[..., it] = (np.nan_to_num(bt, nan=self.barra_stats["tasmax"][0]) - self.barra_stats["tasmax"][0]) \
+                / self.barra_stats["tasmax"][1] * self.fast_std[it] + self.fast_mean[it]   # undone below
         x_fast = (x_fast - self.fast_mean[None, None, None, :]) / self.fast_std[None, None, None, :]
 
         # ---- target: fast branch is daily, so y aligns with its axis ----
@@ -1152,7 +1272,7 @@ class DualWindowDataset(Dataset):
                 y[j] = self.groups[ci][cfg.y_key][lt, y0:y0 + self.ph, x0:x0 + self.pw]
 
         # ---- statics appended to BOTH branches (agb from the target's year) ----
-        agb_p = self._agb(ci_t)[y0:y0 + self.ph, x0:x0 + self.pw]
+        agb_p = self._agb_causal(t_end, y0, x0) if self.causal else self._agb(ci_t)[y0:y0 + self.ph, x0:x0 + self.pw]
         lm_p = self.landmask_f[y0:y0 + self.ph, x0:x0 + self.pw]
         static_list = [agb_p, lm_p]
         if self.use_lightning:
@@ -1191,8 +1311,6 @@ class DualWindowDataset(Dataset):
             slow_days_axis = np.arange(t_end - cfg.slow_days, t_end, cfg.slow_bin)
         fast_days_axis = np.arange(t_end - cfg.fast_days, t_end)
         x_slow = _append_statics(x_slow, self.t_slow, slow_days_axis)
-        if self.slow_veg == "lai+ndvi":
-            x_slow = np.concatenate([x_slow, ndvi_slow[..., None]], axis=-1).astype(np.float32)
         if x_vslow is not None:
             n_v = x_vslow.shape[0]
             v_axis = self.slow_bin_start[b_end-n_v*int(cfg.vslow_bin//cfg.slow_bin):b_end:
@@ -1395,9 +1513,9 @@ class DualWindowDataset(Dataset):
             "x_slow": torch.from_numpy(np.ascontiguousarray(x_slow)),
             "x_fast": torch.from_numpy(np.ascontiguousarray(x_fast)),
             "y": torch.from_numpy(y),
-            "x_cat": torch.from_numpy(
-                np.ascontiguousarray(self.cat_stack[y0:y0 + self.ph, x0:x0 + self.pw, :])
-            ),
+            "x_cat": torch.from_numpy(np.ascontiguousarray(
+                self._cat_causal(t_end, y0, x0) if self.causal
+                else self.cat_stack[y0:y0 + self.ph, x0:x0 + self.pw, :])),
             "mask": torch.from_numpy(lm_p.copy()),
             "x_static": torch.from_numpy(np.ascontiguousarray(st)),
             "t_end": torch.tensor(t_end, dtype=torch.int64),
@@ -1430,11 +1548,16 @@ class DualWindowDataset(Dataset):
         flip, because a naive transform would silently teach the model wrong
         wind/terrain associations (a known risk for directional features):
 
-        - aspect_sin/aspect_cos encode an ABSOLUTE compass bearing (direction
-          the slope faces relative to true North, which does NOT rotate with
-          the patch) -- these get an explicit sin/cos correction on top of the
-          spatial rearrangement, composed in the SAME order as the array
-          transform (k rotations, then the flip).
+        - aspect_sin/aspect_cos (east and north component of the direction the
+          slope faces) and the BARRA-C2 wind components u (east), v (north) are
+          vectors: they turn with the patch. torch.rot90(k=1) over (H, W) turns
+          the image counter-clockwise (rows grow southward), so each rotation
+          maps (east, north) -> (-north, east); the east-west mirror maps
+          east -> -east. Composed in the order of the array transform (k
+          rotations, then the flip); checked against the gradient of a rotated
+          field in tests/test_augment_vectors.py. (Before 2026-10-06 the aspect
+          was turned clockwise, wrong for k = 1 and 3; no model since then used
+          augmentation.)
         - downwind_align is deliberately NOT corrected: it's already a
           RELATIVE angle (cos of the angle between the wind vector and the
           fire->pixel vector), and both of those vectors live in the patch's
@@ -1464,24 +1587,33 @@ class DualWindowDataset(Dataset):
         out["x_cat"] = rot_flip(out["x_cat"], (0, 1))          # (H,W,ncat)
         out["x_static"] = rot_flip(out["x_static"], (0, 1))   # (H,W,C_static)
 
-        if self.aspect_idx is not None:
+        def turn(e, n):
+            """(east, north) components after k counter-clockwise quarter turns, then the mirror."""
+            for _ in range(k):
+                e, n = -n, e
+            if do_flip:
+                e = -e
+            return e, n
+
+        if self.aspect_idx is not None and not self.compact:   # compact: statics only in x_static
             i = self.aspect_idx
             for key in ("x_slow", "x_fast"):
-                s = out[key][..., i].clone(); c = out[key][..., i + 1].clone()
-                for _ in range(k):
-                    s, c = c, -s                # +90deg: sin(t+90)=cos(t), cos(t+90)=-sin(t)
-                if do_flip:
-                    s = -s                      # east-west mirror: sin(-t)=-sin(t), cos(-t)=cos(t)
-                out[key][..., i] = s; out[key][..., i + 1] = c
+                e, n = turn(out[key][..., i].clone(), out[key][..., i + 1].clone())
+                out[key][..., i] = e; out[key][..., i + 1] = n
 
         if self.static_aspect_idx is not None:
             i = self.static_aspect_idx
-            s = out["x_static"][..., i].clone(); c = out["x_static"][..., i + 1].clone()
-            for _ in range(k):
-                s, c = c, -s
-            if do_flip:
-                s = -s
-            out["x_static"][..., i] = s; out["x_static"][..., i + 1] = c
+            e, n = turn(out["x_static"][..., i].clone(), out["x_static"][..., i + 1].clone())
+            out["x_static"][..., i] = e; out["x_static"][..., i + 1] = n
+
+        if self.use_barra_uv:                                    # normalized u, v: turn the physical vector
+            iu = self.channel_layout()["fast"]["wind u/v"][0] - self.compact * self.static_doy_width
+            bst = self.barra_stats
+            u = out["x_fast"][..., iu] * bst["uas"][1] + bst["uas"][0]
+            v = out["x_fast"][..., iu + 1] * bst["vas"][1] + bst["vas"][0]
+            u, v = turn(u, v)
+            out["x_fast"][..., iu] = (u - bst["uas"][0]) / bst["uas"][1]
+            out["x_fast"][..., iu + 1] = (v - bst["vas"][0]) / bst["vas"][1]
 
 
 class DualDataModule(pl.LightningDataModule):
@@ -1528,8 +1660,9 @@ class DualDataModule(pl.LightningDataModule):
         use_frp: bool = False,
         use_barra_uv: bool = False,
         use_wind_align: bool = False,
-        slow_veg: str = "lai",
+        slow_veg: str = "lai500",
         use_fast_ndvi: bool = False,
+        causal_inputs: bool = True,
         vpd_source: str = "montes",
         perfect_forecast: bool = False,
         compact_statics: bool = False,   # statics/day of year inserted on the GPU (expand_compact)
@@ -1592,6 +1725,7 @@ class DualDataModule(pl.LightningDataModule):
             vpd_source=h.vpd_source, perfect_forecast=h.perfect_forecast,
             use_frp=h.use_frp, use_barra_uv=h.use_barra_uv, use_wind_align=h.use_wind_align,
             slow_veg=h.slow_veg, use_fast_ndvi=h.use_fast_ndvi,
+            causal_inputs=h.get("causal_inputs", False),
             compact_statics=h.compact_statics,
         ))
         self.val_ds = DualWindowDataset(DualPatchConfig(
@@ -1620,6 +1754,7 @@ class DualDataModule(pl.LightningDataModule):
             vpd_source=h.vpd_source, perfect_forecast=h.perfect_forecast,
             use_frp=h.use_frp, use_barra_uv=h.use_barra_uv, use_wind_align=h.use_wind_align,
             slow_veg=h.slow_veg, use_fast_ndvi=h.use_fast_ndvi,
+            causal_inputs=h.get("causal_inputs", False),
             fire_history_dropout_prob=0.0,  # val must see the real fire-history signal always
             compact_statics=h.compact_statics,
         ))

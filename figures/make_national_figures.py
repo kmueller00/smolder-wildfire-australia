@@ -1,7 +1,6 @@
 """National evaluation figures (results/national_2020*, written by
 smolder.evaluation.evaluate_national).
 
-fig_national_example.png  one forecast for the whole continent
 fig_national_maps.png     mean predicted risk and observed fire over 2020
 fig_national_skill.png    national lift (with persistence baseline), daily AUC-PR
 """
@@ -15,18 +14,17 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from matplotlib.colors import LinearSegmentedColormap, LogNorm
-from matplotlib.patches import Patch
 from matplotlib.ticker import FuncFormatter, MultipleLocator
-from scipy.stats import rankdata
 from style_smolder import (ACCENT, ACCENT2, GRID_COLOR, INK, MUTED, PANEL_BG, SPINE_COLOR,
                            new_figure, style_axes)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-RES = os.path.join(HERE, "..", "results")
+RES = os.environ.get("NATIONAL_DIR", os.path.join(HERE, "..", "results"))      # a run's national_2020*
+FIG_OUT = os.environ.get("FIG_OUT", HERE)
 S = json.load(open(os.path.join(RES, "national_2020.json")))
 D = pd.read_csv(os.path.join(RES, "national_2020_daily.csv"), parse_dates=["date"])
 M = np.load(os.path.join(RES, "national_2020_maps.npz"))
-_BP = os.path.join(RES, "national_2020_persistence.json")
+_BP = os.environ.get("PERSIST_JSON", os.path.join(HERE, "..", "results", "national_2020_persistence.json"))
 B = json.load(open(_BP)) if os.path.exists(_BP) else None     # evaluate_persistence.py
 BASELINE = "#8A8F98"
 LON0, LAT0, PX = 112.904998779, -9.005000113999998, 0.01
@@ -66,44 +64,6 @@ def coast(ax):
                extent=EXT, origin="upper", zorder=5)
 
 
-def example():
-    """The most fire-active issue day of 2020, whole continent."""
-    i = 0
-    iso = str(M["example_dates"][i])
-    date = f"{int(iso[8:10])} {MONTHS[int(iso[5:7]) - 1]} {iso[:4]}"
-    risk = np.where(LAND, M["example_risk"][i].astype(np.float32), np.nan)
-    pct = np.full(risk.shape, np.nan, np.float32)
-    ok = np.isfinite(risk)
-    pct[ok] = 100.0 * (rankdata(risk[ok]) - 1) / max(ok.sum() - 1, 1)
-    top1 = np.nan_to_num(pct) >= 99.0
-    fire = M["example_fire"][i] & LAND
-    yy, xx = np.where(fire)
-    fx, fy = EXT[0] + (xx + 0.5) * DOWN * PX, EXT[3] - (yy + 0.5) * DOWN * PX
-    hit = top1[yy, xx]
-
-    fig = new_figure((12.5, 10.2))
-    ax = fig.add_subplot(111)
-    im = ax.imshow(pct, extent=EXT, cmap=RISK, vmin=0, vmax=100, interpolation="nearest", zorder=1)
-    ax.contourf(top1.astype(float), levels=[0.5, 1.5], colors="none", hatches=["////"],
-                extent=EXT, origin="upper", zorder=2)
-    coast(ax)
-    ax.scatter(fx[~hit], fy[~hit], s=3.0, c=FIRE_MISS, marker="s", linewidths=0, zorder=4)
-    ax.scatter(fx[hit], fy[hit], s=3.0, c=FIRE_HIT, marker="s", linewidths=0, zorder=4)
-    geo_axes(ax)
-    cb = fig.colorbar(im, ax=ax, fraction=0.03, pad=0.02)
-    cb.set_label("Predicted risk, percentile across Australia", fontsize=9.5, color=INK)
-    cb.outline.set_edgecolor(SPINE_COLOR)
-    ax.legend(handles=[Patch(facecolor="none", edgecolor=HATCH, hatch="////", label="National top-1% risk area"),
-                       Patch(facecolor=FIRE_HIT, label="Observed fire inside it"),
-                       Patch(facecolor=FIRE_MISS, label="Observed fire outside it"),
-                       Patch(facecolor=OCEAN, label="Ocean")],
-              loc="lower left", fontsize=9, frameon=True, facecolor="white", edgecolor=MUTED)
-    ax.set_title(f"SMOLDER forecast issued {date}: fire risk for the next 3 days",
-                 fontsize=13.5, fontweight="bold", color=INK, pad=10)
-    fig.savefig(os.path.join(HERE, "fig_national_example.png"), dpi=220, bbox_inches="tight", facecolor="white")
-    print("wrote fig_national_example.png")
-
-
 def maps():
     fig = new_figure((15.0, 6.6))
     a, b = fig.add_subplot(121), fig.add_subplot(122)
@@ -126,7 +86,7 @@ def maps():
         geo_axes(ax)
     fig.suptitle("Annual picture, 2020 hold-out year", fontsize=14, fontweight="bold", color=INK, y=1.0)
     fig.tight_layout()
-    fig.savefig(os.path.join(HERE, "fig_national_maps.png"), dpi=220, bbox_inches="tight", facecolor="white")
+    fig.savefig(os.path.join(FIG_OUT, "fig_national_maps.png"), dpi=220, bbox_inches="tight", facecolor="white")
     print("wrote fig_national_maps.png")
 
 
@@ -164,11 +124,10 @@ def skill():
 
     fig.suptitle("National skill, 2020 hold-out year", fontsize=14, fontweight="bold", color=INK, y=1.03)
     fig.tight_layout()
-    fig.savefig(os.path.join(HERE, "fig_national_skill.png"), dpi=250, bbox_inches="tight", facecolor="white")
+    fig.savefig(os.path.join(FIG_OUT, "fig_national_skill.png"), dpi=250, bbox_inches="tight", facecolor="white")
     print("wrote fig_national_skill.png")
 
 
 if __name__ == "__main__":
-    example()
     maps()
     skill()
